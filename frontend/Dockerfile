@@ -5,8 +5,8 @@ FROM node:18-alpine
 WORKDIR /app
 
 # Build-time argument for API URL
-ARG NEXT_PUBLIC_API_URL=http://localhost:8927/api
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=/api
 
 # Copy package files
 COPY package*.json ./
@@ -26,3 +26,4 @@ EXPOSE 3000
 
 # Start the Next.js server
 CMD ["npm", "start"]
+

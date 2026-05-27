@@ -56,4 +56,4 @@ RUN if [ ! -f .env ]; then \
 EXPOSE 8000
 
 # Command to run the application with multiple workers for better concurrency
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8", "--loop", "uvloop", "--log-level", "info"]
+CMD ["uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4 --loop uvloop --log-level info
