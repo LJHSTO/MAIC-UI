@@ -1,7 +1,7 @@
 import Cookies from 'js-cookie'
 import { WebEditRequest, WebEditResponse, WebEditStatusResponse, CitationListItem, ModelType } from './types'
 
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api')
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
 export class WebEditorAPI {
 	private isPublic: boolean

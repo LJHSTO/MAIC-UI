@@ -9,7 +9,6 @@ services:
       args:
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
-      network: host
     container_name: maic_ui_backend
     volumes:
       - ./backend/uploads:/app/uploads
@@ -17,7 +16,6 @@ services:
     env_file:
       - .env  # 从主目录读取 .env 文件
     environment:
-      # 这些配置会覆盖 .env 中的同名变量（如果需要覆盖的话）
       - DATABASE_URL=sqlite:///./learn_your_way.db
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=1440
@@ -41,10 +39,8 @@ services:
       args:
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
-      network: host
+        NEXT_PUBLIC_API_URL: http://localhost:8927/api
     container_name: maic_ui_frontend
-    env_file:
-      - .env  # 从主目录读取 .env 文件（如果需要的话）
     depends_on:
       - backend
     restart: unless-stopped

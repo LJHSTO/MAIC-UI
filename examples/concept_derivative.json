@@ -1,0 +1,12 @@
+{
+  "subject": "math",
+  "concept_name": "Derivative as rate of change",
+  "concept_overview": "Explain the derivative as an instantaneous rate of change using motion, slope, and tangent lines.",
+  "mastery_points": "Students can interpret positive, negative, and zero derivative values; connect derivative units to real contexts; and estimate a derivative from a graph.",
+  "design_idea": "Create a micro lesson with prediction questions, a draggable point on a curve, visual slope comparison, one worked example, one misconception repair, and one transfer problem.",
+  "grade_level": 11,
+  "description": "High-school calculus active learning micro lesson.",
+  "interests": "physics,sports",
+  "include_exercises": true,
+  "include_prerequisites": true
+}

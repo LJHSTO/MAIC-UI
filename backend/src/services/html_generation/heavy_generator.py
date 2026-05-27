@@ -12,6 +12,7 @@ import os
 import time
 import logging
 import asyncio
+import html as html_lib
 from typing import Dict, List, Optional, Any
 
 from .base_generator import BaseGenerator
@@ -161,6 +162,13 @@ class HeavyGenerator(BaseGenerator):
         else:
             interests_text = ', '.join(interests) if interests else '综合学习'
 
+        user_instruction = (
+            user_preferences.get('description')
+            or user_preferences.get('user_instruction')
+            or user_preferences.get('learning_goal')
+            or ''
+        )
+
         return {
             'concept_info': json.dumps(procedural_concepts, ensure_ascii=False, indent=2),
             'key_concepts': analysis.get('key_concepts', []),
@@ -174,7 +182,8 @@ class HeavyGenerator(BaseGenerator):
             'accent_color': theme['accent'].replace('#', ''),
             'procedural_concepts': json.dumps(procedural_concepts, ensure_ascii=False, indent=2),
             'analysis': analysis,
-            'language': language
+            'language': language,
+            'user_instruction': user_instruction
         }
 
     async def _execute_stage(self, stage_name: str, context: Dict,
@@ -273,6 +282,7 @@ class HeavyGenerator(BaseGenerator):
                     model=getattr(self.provider, 'text_model', os.getenv('ZHIPU_TEXT_MODEL', 'glm-4.6')),
                     messages=[{"role": "user", "content": prompt}],
                     thinking_params={"type": "enabled" if thinking_enabled else "disabled"},
+                    max_tokens=int(os.getenv("HTML_GENERATION_MAX_TOKENS", "16000")),
                 )
                 if response and response.choices and response.choices[0].message:
                     return response.choices[0].message.content
@@ -300,7 +310,7 @@ class HeavyGenerator(BaseGenerator):
                 if result is not None:
                     return result
 
-            elif backend == 'zhipu' and hasattr(self.provider, '_run_zhipu_call'):
+            elif backend in ('zhipu', 'openai_compat') and hasattr(self.provider, '_run_zhipu_call'):
                 result = await _call_zhipu()
                 if result is not None:
                     return result
@@ -406,20 +416,312 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
         return html.replace('</head>', style + '</head>')
 
     def _emergency_template(self, analysis: Dict, user_preferences: Dict) -> str:
-        """Emergency fallback template."""
+        """Deterministic interactive page used when remote HTML generation times out."""
+        subject = html_lib.escape(str(analysis.get('subject_area', '学习')))
+        topics = analysis.get('main_topics', []) or []
+        concepts = analysis.get('key_concepts', []) or []
+        objectives = analysis.get('learning_objectives', []) or []
+        procedural_concepts = analysis.get('procedural_concepts', []) or []
+
+        def list_items(items: List[Any], fallback: str) -> str:
+            values = [html_lib.escape(str(item)) for item in items if str(item).strip()]
+            if not values:
+                values = [fallback]
+            return "\n".join(f"<li>{item}</li>" for item in values)
+
+        concept_cards = []
+        for concept in procedural_concepts[:4]:
+            if not isinstance(concept, dict):
+                continue
+            name = html_lib.escape(str(concept.get('name', '核心概念')))
+            desc = html_lib.escape(str(concept.get('description', '')))
+            steps = concept.get('key_steps', []) or []
+            concept_cards.append(f"""
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-xl font-bold text-slate-900">{name}</h2>
+                <p class="mt-2 text-slate-600">{desc}</p>
+                <ol class="mt-4 list-decimal space-y-2 pl-5 text-slate-700">
+                    {list_items(steps, '先理解概念，再完成练习，最后检查掌握程度。')}
+                </ol>
+            </section>
+            """)
+
+        if not concept_cards:
+            concept_cards.append("""
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-xl font-bold text-slate-900">核心学习路径</h2>
+                <p class="mt-2 text-slate-600">系统已完成内容分析，并生成了本地交互学习页。请先用图像和滑块建立直觉。</p>
+            </section>
+            """)
+
+        concept_tags = "".join(
+            f'<span class="rounded-full bg-white px-3 py-1 text-sm font-medium text-sky-900 shadow-sm">{html_lib.escape(str(concept))}</span>'
+            for concept in concepts[:12]
+        )
+
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>学习网站</title>
+    <title>{subject}交互学习页</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {{ font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; }}
+        canvas {{ width: 100%; height: 420px; display: block; }}
+        input[type="range"] {{ accent-color: #4f46e5; }}
+    </style>
 </head>
-<body class="bg-gray-50">
-    <div class="container mx-auto px-4 py-8">
-        <h1 class="text-3xl font-bold mb-4">{analysis.get('subject_area', '学习')}</h1>
-        <p>内容生成中遇到问题，请稍后重试。</p>
+<body class="bg-slate-50 text-slate-800">
+    <div class="mx-auto max-w-5xl px-4 py-8">
+        <header class="mb-6">
+            <p class="text-sm font-semibold text-violet-700">本地交互学习页</p>
+            <h1 class="mt-2 text-3xl font-bold text-slate-950">{subject}</h1>
+            <p class="mt-3 text-slate-600">远端大模型生成完整页面超时，系统已基于PDF内容分析生成可运行的交互学习页。</p>
+        </header>
+
+        <div class="grid gap-5 lg:grid-cols-[0.92fr_1.08fr]">
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 class="text-xl font-bold text-slate-950">学习目标</h2>
+                <ul class="mt-3 list-disc space-y-2 pl-5 text-slate-700">
+                    {list_items(objectives, '理解材料中的核心概念并完成应用练习。')}
+                </ul>
+                <div class="mt-5 rounded-lg bg-violet-50 p-4">
+                    <h3 class="font-bold text-violet-950">主要主题</h3>
+                    <ul class="mt-2 list-disc space-y-1 pl-5 text-violet-900">
+                        {list_items(topics, 'PDF核心内容')}
+                    </ul>
+                </div>
+            </section>
+
+            <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-950">导数、梯度与下降路径</h2>
+                        <p class="mt-1 text-sm text-slate-600">拖动参数，观察切线斜率如何变成梯度下降的方向。</p>
+                    </div>
+                    <div class="flex rounded-lg bg-slate-100 p-1 text-sm font-semibold">
+                        <button id="modeDerivative" class="rounded-md bg-white px-3 py-1.5 text-indigo-700 shadow-sm">导数</button>
+                        <button id="modeGradient" class="rounded-md px-3 py-1.5 text-slate-600">梯度下降</button>
+                        <button id="modeBackprop" class="rounded-md px-3 py-1.5 text-slate-600">链式法则</button>
+                    </div>
+                </div>
+                <div class="mt-4 rounded-xl bg-slate-950 p-3">
+                    <canvas id="learningCanvas" width="900" height="420" aria-label="导数、梯度下降与链式法则交互图"></canvas>
+                </div>
+                <div class="mt-4 grid gap-4 md:grid-cols-3">
+                    <label class="text-sm font-semibold text-slate-700">观察点 x = <span id="xValue">0.00</span>
+                        <input id="xSlider" class="mt-2 w-full" type="range" min="-250" max="350" value="60">
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">学习率 = <span id="lrValue">0.12</span>
+                        <input id="lrSlider" class="mt-2 w-full" type="range" min="2" max="28" value="12">
+                    </label>
+                    <label class="text-sm font-semibold text-slate-700">迭代步数 = <span id="iterValue">8</span>
+                        <input id="iterSlider" class="mt-2 w-full" type="range" min="1" max="24" value="8">
+                    </label>
+                </div>
+                <div class="mt-4 grid gap-3 text-sm md:grid-cols-4">
+                    <div class="rounded-lg bg-indigo-50 p-3"><div class="text-indigo-700">函数值 f(x)</div><div id="fxData" class="text-lg font-bold text-indigo-950">-</div></div>
+                    <div class="rounded-lg bg-emerald-50 p-3"><div class="text-emerald-700">导数 f'(x)</div><div id="gradData" class="text-lg font-bold text-emerald-950">-</div></div>
+                    <div class="rounded-lg bg-amber-50 p-3"><div class="text-amber-700">下一步方向</div><div id="directionData" class="text-lg font-bold text-amber-950">-</div></div>
+                    <div class="rounded-lg bg-rose-50 p-3"><div class="text-rose-700">直觉提示</div><div id="hintData" class="text-sm font-semibold text-rose-950">-</div></div>
+                </div>
+            </section>
+        </div>
+
+        <section class="mb-6 rounded-xl border border-sky-200 bg-sky-50 p-5">
+            <h2 class="text-lg font-bold text-sky-950">关键概念</h2>
+            <div class="mt-3 flex flex-wrap gap-2">
+                {concept_tags}
+            </div>
+        </section>
+
+        <main class="grid gap-4">
+            {"".join(concept_cards)}
+        </main>
     </div>
+    <script>
+        const canvas = document.getElementById('learningCanvas');
+        const ctx = canvas.getContext('2d');
+        const xSlider = document.getElementById('xSlider');
+        const lrSlider = document.getElementById('lrSlider');
+        const iterSlider = document.getElementById('iterSlider');
+        const xValue = document.getElementById('xValue');
+        const lrValue = document.getElementById('lrValue');
+        const iterValue = document.getElementById('iterValue');
+        const fxData = document.getElementById('fxData');
+        const gradData = document.getElementById('gradData');
+        const directionData = document.getElementById('directionData');
+        const hintData = document.getElementById('hintData');
+        const modeButtons = {{
+            derivative: document.getElementById('modeDerivative'),
+            gradient: document.getElementById('modeGradient'),
+            backprop: document.getElementById('modeBackprop')
+        }};
+        let mode = 'derivative';
+
+        function f(x) {{ return 0.18 * (x - 0.8) * (x - 0.8) + 0.35 * Math.sin(2.2 * x) + 1.1; }}
+        function df(x) {{ return 0.36 * (x - 0.8) + 0.77 * Math.cos(2.2 * x); }}
+        function sx(x) {{ return 80 + (x + 3) / 6 * (canvas.width - 150); }}
+        function sy(y) {{ return canvas.height - 52 - y / 3.4 * (canvas.height - 95); }}
+        function vx() {{ return Number(xSlider.value) / 100; }}
+        function lr() {{ return Number(lrSlider.value) / 100; }}
+
+        function drawAxes() {{
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(70, canvas.height - 52);
+            ctx.lineTo(canvas.width - 45, canvas.height - 52);
+            ctx.moveTo(80, 35);
+            ctx.lineTo(80, canvas.height - 42);
+            ctx.stroke();
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '14px Microsoft YaHei';
+            ctx.fillText('x', canvas.width - 52, canvas.height - 62);
+            ctx.fillText('f(x)', 90, 34);
+        }}
+
+        function drawCurve() {{
+            ctx.strokeStyle = '#60a5fa';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            for (let i = 0; i <= 360; i++) {{
+                const x = -3 + i / 60;
+                const px = sx(x);
+                const py = sy(f(x));
+                if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            }}
+            ctx.stroke();
+        }}
+
+        function drawDerivative(x) {{
+            const y = f(x);
+            const g = df(x);
+            const px = sx(x);
+            const py = sy(y);
+            const span = 1.3;
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(sx(x - span), sy(y - g * span));
+            ctx.lineTo(sx(x + span), sy(y + g * span));
+            ctx.stroke();
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.arc(px, py, 7, 0, Math.PI * 2);
+            ctx.fill();
+        }}
+
+        function drawGradientPath(start, rate, steps) {{
+            let x = start;
+            ctx.strokeStyle = '#facc15';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(sx(x), sy(f(x)));
+            for (let i = 0; i < steps; i++) {{
+                x = x - rate * df(x);
+                ctx.lineTo(sx(x), sy(f(x)));
+            }}
+            ctx.stroke();
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.arc(sx(x), sy(f(x)), 6, 0, Math.PI * 2);
+            ctx.fill();
+        }}
+
+        function drawBackprop() {{
+            const nodes = [
+                ['输入 x', 130, 110], ['线性 z=wx+b', 330, 110], ['激活 a=g(z)', 530, 110], ['损失 L', 730, 110],
+                ['∂L/∂a', 610, 265], ['∂a/∂z', 430, 265], ['∂z/∂w', 250, 265]
+            ];
+            ctx.font = '16px Microsoft YaHei';
+            nodes.forEach(function(n) {{
+                ctx.fillStyle = '#1e293b';
+                ctx.strokeStyle = '#8b5cf6';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(n[1] - 62, n[2] - 24, 124, 48, 12);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#f8fafc';
+                ctx.textAlign = 'center';
+                ctx.fillText(n[0], n[1], n[2] + 6);
+            }});
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 3;
+            [[192,110,268,110],[392,110,468,110],[592,110,668,110],[680,135,640,240],[550,265,490,265],[370,265,310,265]].forEach(function(e) {{
+                ctx.beginPath();
+                ctx.moveTo(e[0], e[1]);
+                ctx.lineTo(e[2], e[3]);
+                ctx.stroke();
+            }});
+            ctx.fillStyle = '#cbd5e1';
+            ctx.textAlign = 'left';
+            ctx.fillText('链式法则：整体影响 = 局部影响逐层相乘', 90, 360);
+        }}
+
+        function setMode(next) {{
+            mode = next;
+            Object.keys(modeButtons).forEach(function(key) {{
+                const active = key === next;
+                modeButtons[key].className = active
+                    ? 'rounded-md bg-white px-3 py-1.5 text-indigo-700 shadow-sm'
+                    : 'rounded-md px-3 py-1.5 text-slate-600';
+            }});
+            draw();
+        }}
+
+        function draw() {{
+            const x = vx();
+            const rate = lr();
+            const steps = Number(iterSlider.value);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#020617';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawAxes();
+            if (mode === 'backprop') {{
+                drawBackprop();
+            }} else {{
+                drawCurve();
+                drawDerivative(x);
+                if (mode === 'gradient') drawGradientPath(x, rate, steps);
+            }}
+            const y = f(x);
+            const g = df(x);
+            xValue.textContent = x.toFixed(2);
+            lrValue.textContent = rate.toFixed(2);
+            iterValue.textContent = String(steps);
+            fxData.textContent = y.toFixed(3);
+            gradData.textContent = g.toFixed(3);
+            directionData.textContent = g > 0 ? '向左更新' : '向右更新';
+            hintData.textContent = mode === 'backprop'
+                ? '反向传播就是在计算图上反复使用链式法则。'
+                : (Math.abs(g) < 0.08 ? '接近极小值，梯度很小。' : '沿负梯度方向移动，函数值通常下降。');
+        }}
+
+        modeButtons.derivative.addEventListener('click', function() {{ setMode('derivative'); }});
+        modeButtons.gradient.addEventListener('click', function() {{ setMode('gradient'); }});
+        modeButtons.backprop.addEventListener('click', function() {{ setMode('backprop'); }});
+        [xSlider, lrSlider, iterSlider].forEach(function(el) {{ el.addEventListener('input', draw); }});
+        if (!CanvasRenderingContext2D.prototype.roundRect) {{
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {{
+                this.beginPath();
+                this.moveTo(x + r, y);
+                this.lineTo(x + w - r, y);
+                this.quadraticCurveTo(x + w, y, x + w, y + r);
+                this.lineTo(x + w, y + h - r);
+                this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                this.lineTo(x + r, y + h);
+                this.quadraticCurveTo(x, y + h, x, y + h - r);
+                this.lineTo(x, y + r);
+                this.quadraticCurveTo(x, y, x + r, y);
+                this.closePath();
+                return this;
+            }};
+        }}
+        draw();
+    </script>
 </body>
 </html>"""
 

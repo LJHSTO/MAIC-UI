@@ -8,9 +8,8 @@ import { useModelSettings } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage } from '@/components/providers/LanguageProvider'
 
 const API_BASE_URL =
-  process.env.NODE_ENV === 'production'
-    ? '/api'
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
 interface PPTUploadFormProps {
   onSuccess?: (documentId: number) => void

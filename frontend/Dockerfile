@@ -4,6 +4,10 @@ FROM node:18-alpine
 # Set working directory
 WORKDIR /app
 
+# Build-time argument for API URL
+ARG NEXT_PUBLIC_API_URL=http://localhost:8927/api
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 # Copy package files
 COPY package*.json ./
 

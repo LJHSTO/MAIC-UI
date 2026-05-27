@@ -12,9 +12,8 @@ import { ConceptInputForm } from '@/components/pdf/ConceptInputForm'
 import PPTUploadForm from '@/components/ppt-viewer/PPTUploadForm'
 
 const API_BASE_URL =
-  process.env.NODE_ENV === 'production'
-    ? '/api'
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
 interface Document {
   id: number
@@ -48,10 +47,17 @@ export default function DashboardPage() {
 
   const models: { value: AIModel; label: string; description: string }[] = [
     { value: 'glm-4.7', label: t('model.glm47'), description: t('model.glm47_desc') },
-    { value: 'glm-4.6', label: t('model.glm46'), description: t('model.glm46_desc') },
+    { value: 'claude-opus-4-7', label: 'Claude Opus 4.7', description: '最新旗舰推理模型' },
     { value: 'claude-opus-4-6', label: t('model.opus46'), description: t('model.opus46_desc') },
     { value: 'claude-sonnet-4-6', label: t('model.sonnet46'), description: t('model.sonnet46_desc') },
-    { value: 'claude-haiku-4-5-20251001', label: t('model.haiku45'), description: t('model.haiku45_desc') }
+    { value: 'gpt-5.4', label: t('model.gpt54'), description: t('model.gpt54_desc') },
+    { value: 'gpt-5.5', label: t('model.gpt55'), description: t('model.gpt55_desc') },
+    { value: 'deepseek-v4-pro', label: t('model.deepseek_v4_pro'), description: t('model.deepseek_v4_pro_desc') },
+    { value: 'deepseek-v4-flash', label: t('model.deepseek_v4_flash'), description: t('model.deepseek_v4_flash_desc') },
+    { value: 'gemini-3.1-pro', label: t('model.gemini_pro'), description: t('model.gemini_pro_desc') },
+    { value: 'kimi-k2.6', label: t('model.kimi_k26'), description: t('model.kimi_k26_desc') },
+    { value: 'minimax-m2.5', label: t('model.minimax_m25'), description: t('model.minimax_m25_desc') },
+    { value: 'qwen3.6-35b-a3b', label: t('model.qwen36_35b_a3b'), description: t('model.qwen36_35b_a3b_desc') },
   ]
 
   const languages: { value: Language; label: string }[] = [

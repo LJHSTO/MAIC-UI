@@ -44,7 +44,7 @@ class WebEditRequest(BaseModel):
 	citations: List[CitationItem]
 	user_prompt: str
 	thinking_enabled: Optional[bool] = None
-	model: Optional[str] = None  # 'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001', 'glm-4.7', 'glm-4.6'
+	model: Optional[str] = None  # 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4', 'gpt-5.5', 'deepseek-v4-pro', 'gemini-3.1-pro', 'kimi-k2.6', 'qwen3.6-35b-a3b'
 
 
 class WebEditResponse(BaseModel):

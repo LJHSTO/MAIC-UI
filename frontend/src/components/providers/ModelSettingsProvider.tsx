@@ -3,16 +3,32 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 
 // Zhipu models
-export type ZhipuModel = 'glm-4.7' | 'glm-4.6'
+export type ZhipuModel = 'glm-4.7' | 'glm-4.6' | 'glm-5.1'
 
-// Anthropic models
-export type AnthropicModel = 'claude-opus-4-6' | 'claude-sonnet-4-6' | 'claude-haiku-4-5-20251001'
+// Anthropic models (via uuapi transfer station)
+export type AnthropicModel =
+  | 'claude-opus-4-7'
+  | 'claude-opus-4-6'
+  | 'claude-sonnet-4-6'
+  | 'claude-haiku-4-5'
+  | 'claude-opus-4-5'
+  | 'claude-sonnet-4-5'
+
+// OpenAI-compatible models (via transfer station)
+export type OpenAICompatModel =
+  | 'gpt-5' | 'gpt-5.4' | 'gpt-5.5'
+  | 'gpt-4.1-mini'
+  | 'deepseek-v4-pro' | 'deepseek-v4-flash'
+  | 'gemini-3.1-pro' | 'gemini-3.5-flash' | 'gemini-3-flash-preview' | 'gemini-2.5-pro'
+  | 'kimi-k2.6'
+  | 'minimax-m2.5'
+  | 'qwen3.6-35b-a3b'
 
 // All available AI models
-export type AIModel = ZhipuModel | AnthropicModel
+export type AIModel = ZhipuModel | AnthropicModel | OpenAICompatModel
 
 // Model provider type
-export type ModelProvider = 'zhipu' | 'anthropic'
+export type ModelProvider = 'zhipu' | 'anthropic' | 'openai_compat'
 
 interface ModelSettingsContextType {
   selectedModel: AIModel
@@ -27,17 +43,27 @@ function getProviderFromModel(model: AIModel): ModelProvider {
   if (model.startsWith('glm-')) {
     return 'zhipu'
   }
-  return 'anthropic'
+  if (model.startsWith('claude-')) {
+    return 'anthropic'
+  }
+  return 'openai_compat'
 }
 
 // Valid models list
 const VALID_MODELS: AIModel[] = [
-  'glm-4.7', 'glm-4.6',
-  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'
+  'glm-4.7', 'glm-4.6', 'glm-5.1',
+  'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6',
+  'claude-haiku-4-5', 'claude-opus-4-5', 'claude-sonnet-4-5',
+  'gpt-5', 'gpt-5.4', 'gpt-5.5', 'gpt-4.1-mini',
+  'deepseek-v4-pro', 'deepseek-v4-flash',
+  'gemini-3.1-pro', 'gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-2.5-pro',
+  'kimi-k2.6',
+  'minimax-m2.5',
+  'qwen3.6-35b-a3b',
 ]
 
 export function ModelSettingsProvider({ children }: { children: React.ReactNode }) {
-  const [selectedModel, setSelectedModelState] = useState<AIModel>('glm-4.7')
+  const [selectedModel, setSelectedModelState] = useState<AIModel>('qwen3.6-35b-a3b')
 
   // Load saved model preference from localStorage on mount
   useEffect(() => {

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极限计算方法 - 交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Source Han Sans CN', 'Microsoft YaHei', 'SimHei', sans-serif;
+            letter-spacing: 0.01em;
+        }
+        .step-card {
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+        }
+        .step-card.active {
+            background-color: #eff6ff;
+            border-left-color: #6366F1;
+            transform: translateX(4px);
+        }
+        .step-card.completed {
+            background-color: #f0fdf4;
+            border-left-color: #22c55e;
+        }
+        .step-card:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .slider-container {
+            position: relative;
+        }
+        .slider-value {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #6366F1;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        canvas {
+            border: 1px solid #e5e7eb;
+            border-radius: 1.5rem;
+            background: linear-gradient(to bottom right, #f8fafc, #ffffff);
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+        }
+        .btn-primary {
+            background-color: #6366F1;
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover {
+            transform: scale(1.05);
+            background-color: #4f46e5;
+        }
+        .btn-primary:active {
+            transform: scale(0.95);
+        }
+        .btn-secondary {
+            background-color: #8b5cf6;
+            transition: all 0.2s ease;
+        }
+        .btn-secondary:hover {
+            transform: scale(1.05);
+            background-color: #7c3aed;
+        }
+        .btn-secondary:active {
+            transform: scale(0.95);
+        }
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-50 to-white min-h-screen">
+    <header class="bg-white shadow-md p-6">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">极限计算方法</h1>
+        <p class="text-center text-gray-600 mt-2 text-lg leading-relaxed">通过交互式模拟理解函数极限的计算过程</p>
+    </header>
+
+    <main class="container mx-auto px-4 py-8 max-w-7xl">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- 左侧：过程面板 -->
+            <div class="process-panel bg-white rounded-2xl shadow-lg p-8 h-fit">
+                <h2 class="text-2xl font-bold mb-6 text-gray-800">计算步骤</h2>
+                
+                <div class="space-y-4">
+                    <!-- 步骤1 -->
+                    <div class="step-card p-6 rounded-xl cursor-pointer" data-step="1" tabindex="0" role="button" aria-label="步骤1：识别极限类型">
+                        <div class="flex items-start">
+                            <span class="step-number bg-indigo-500 text-white rounded-full w-10 h-10 flex items-center justify-center mr-4 font-bold text-lg">1</span>
+                            <div class="flex-1">
+                                <h3 class="font-semibold text-gray-800 text-lg mb-2">识别极限类型</h3>
+                                <p class="text-gray-600 mt-1 text-base leading-relaxed mb-3">确定函数在趋近点附近的行为，判断是直接代入、无穷大还是需要特殊处理</p>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <span class="inline-block bg-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 border border-gray-200">0/0型</span>
+                                    <span class="inline-block bg-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 border border-gray-200">∞/∞型</span>
+                                    <span class="inline-block bg-gray-100 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 border border-gray-200">其他</span>
+                                </div>
+                            </div>
+                            <span class="step-status ml-4 flex-shrink-0"></span>
+                        </div>
+                    </div>
+
+                    <!-- 步骤2 -->
+                    <div class="step-card p-6 rounded-xl cursor-pointer" data-step="2" tabindex="0" role="button" aria-label="步骤2：应用存在准则">
+                        <div class="flex items-start">
+                            <span class="step-number bg-gray-400 text-white rounded-full w-10 h-10 flex items-center justify-center mr-4 font-bold text-lg">2</span>
+                            <div class="flex-1">
+                                <h3 class="font-semibold text-gray-800 text-lg mb-2">应用存在准则</h3>
+                                <p class="text-gray-600 mt-1 text-base leading-relaxed mb-3">检查极限存在的条件：左右极限是否相等，函数是否在该点有定义</p>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">左极限</span>
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">右极限</span>
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">极限存在</span>
+                                </div>
+                            </div>
+                            <span class="step-status ml-4 flex-shrink-0"></span>
+                        </div>
+                    </div>
+
+                    <!-- 步骤3 -->
+                    <div class="step-card p-6 rounded-xl cursor-pointer" data-step="3" tabindex="0" role="button" aria-label="步骤3：使用公式计算">
+                        <div class="flex items-start">
+                            <span class="step-number bg-gray-400 text-white rounded-full w-10 h-10 flex items-center justify-center mr-4 font-bold text-lg">3</span>
+                            <div class="flex-1">
+                                <h3 class="font-semibold text-gray-800 text-lg mb-2">使用公式计算</h3>
+                                <p class="text-gray-600 mt-1 text-base leading-relaxed mb-3">根据极限类型选择合适的计算方法：洛必达法则、泰勒展开、重要极限公式等</p>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">洛必达法则</span>
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">重要极限</span>
+                                    <span class="inline-block bg-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium text-indigo-700 border border-indigo-200">等价无穷小</span>
+                                </div>
+                            </div>
+                            <span class="step-status ml-4 flex-shrink-0"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 公式展示区 -->
+                <div class="mt-8 p-6 bg-gradient-to-br from-gray-50 to-white rounded-xl border border-gray-200">
+                    <h3 class="font-semibold text-gray-800 text-lg mb-4">常用极限公式</h3>
+                    <div class="text-sm text-gray-600 space-y-2 leading-relaxed">
+                        <p class="font-mono">lim<sub>x→0</sub> sin(x)/x = 1</p>
+                        <p class="font-mono">lim<sub>x→0</sub> (1+x)<sup>1/x</sup> = e</p>
+                        <p class="font-mono">lim<sub>x→∞</sub> (1+1/x)<sup>x</sup> = e</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：模拟面板 -->
+            <div class="simulation-panel bg-white rounded-2xl shadow-lg p-8 h-fit">
+                <h2 class="text-2xl font-bold mb-6 text-gray-800">交互式模拟</h2>
+                
+                <!-- Canvas 画布 -->
+                <div class="mb-6">
+                    <canvas id="simulationCanvas" width="400" height="300" aria-label="函数极限模拟图表"></canvas>
+                </div>
+
+                <!-- 控制面板 -->
+                <div class="space-y-6">
+                    <!-- 基本控制按钮 -->
+                    <div class="flex space-x-3">
+                        <button id="startBtn" class="btn-primary flex-1 text-white font-semibold py-3 px-6 rounded-xl shadow-md focus:outline-none focus:ring-4 focus:ring-indigo-300" aria-label="开始模拟">
+                            开始
+                        </button>
+                        <button id="pauseBtn" class="btn-secondary flex-1 text-white font-semibold py-3 px-6 rounded-xl shadow-md focus:outline-none focus:ring-4 focus:ring-purple-300" aria-label="暂停模拟">
+                            暂停
+                        </button>
+                        <button id="resetBtn" class="bg-gray-500 hover:bg-gray-600 hover:scale-105 text-white font-semibold py-3 px-6 rounded-xl shadow-md transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-gray-300" aria-label="重置模拟">
+                            重置
+                        </button>
+                    </div>
+
+                    <!-- 参数调节 -->
+                    <div class="space-y-4">
+                        <div class="slider-container">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                函数类型
+                            </label>
+                            <input type="range" id="functionType" min="0" max="2" value="0" 
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                   aria-label="选择函数类型">
+                            <div class="slider-value" id="functionTypeValue">sin(x)/x</div>
+                        </div>
+
+                        <div class="slider-container">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                趋近点
+                            </label>
+                            <input type="range" id="approachPoint" min="0.1" max="3" step="0.1" value="1" 
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                   aria-label="调整趋近点">
+                            <div class="slider-value" id="approachPointValue">1.0</div>
+                        </div>
+                    </div>
+
+                    <!-- 实时数据显示 -->
+                    <div class="bg-gradient-to-br from-gray-50 to-white p-6 rounded-xl border border-gray-200">
+                        <h3 class="font-semibold text-gray-800 text-lg mb-4">实时数据</h3>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div class="bg-white p-3 rounded-lg border border-gray-200">
+                                <span class="text-gray-600 block mb-1">当前 x 值：</span>
+                                <span id="currentX" class="font-mono text-lg text-indigo-600">-</span>
+                            </div>
+                            <div class="bg-white p-3 rounded-lg border border-gray-200">
+                                <span class="text-gray-600 block mb-1">当前 f(x) 值：</span>
+                                <span id="currentF" class="font-mono text-lg text-indigo-600">-</span>
+                            </div>
+                            <div class="bg-white p-3 rounded-lg border border-gray-200">
+                                <span class="text-gray-600 block mb-1">左极限：</span>
+                                <span id="leftLimit" class="font-mono text-lg text-purple-600">-</span>
+                            </div>
+                            <div class="bg-white p-3 rounded-lg border border-gray-200">
+                                <span class="text-gray-600 block mb-1">右极限：</span>
+                                <span id="rightLimit" class="font-mono text-lg text-purple-600">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 进度提示 -->
+                    <div id="progressMessage" class="hidden bg-indigo-100 border-l-4 border-indigo-500 p-4 rounded-xl">
+                        <p class="text-indigo-700 font-medium"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 全局变量
+        let canvas = document.getElementById('simulationCanvas');
+        let ctx = canvas.getContext('2d');
+        let animationId = null;
+        let currentStep = 1;
+        let isPaused = false;
+        let xValue = 0;
+        let direction = 1;
+        let functions = [
+            { name: 'sin(x)/x', func: (x) => x === 0 ? 1 : Math.sin(x) / x, color: '#6366F1' },
+            { name: '(1+x)^(1/x)', func: (x) => Math.pow(1 + x, 1/x), color: '#8b5cf6' },
+            { name: 'e^x / (1 + e^x)', func: (x) => Math.exp(x) / (1 + Math.exp(x)), color: '#10b981' }
+        ];
+        let currentFunction = 0;
+        let approachPoint = 1;
+
+        // 初始化
+        function init() {
+            updateStepHighlight(1);
+            drawGraph();
+            setupEventListeners();
+        }
+
+        // 设置事件监听器
+        function setupEventListeners() {
+            // 步骤点击
+            document.querySelectorAll('.step-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const step = parseInt(card.dataset.step);
+                    updateStepHighlight(step);
+                });
+                
+                // 键盘导航支持
+                card.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        const step = parseInt(card.dataset.step);
+                        updateStepHighlight(step);
+                    }
+                });
+            });
+
+            // 控制按钮
+            document.getElementById('startBtn').addEventListener('click', startSimulation);
+            document.getElementById('pauseBtn').addEventListener('click', pauseSimulation);
+            document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+
+            // 滑块
+            document.getElementById('functionType').addEventListener('input', (e) => {
+                currentFunction = parseInt(e.target.value);
+                document.getElementById('functionTypeValue').textContent = functions[currentFunction].name;
+                drawGraph();
+            });
+
+            document.getElementById('approachPoint').addEventListener('input', (e) => {
+                approachPoint = parseFloat(e.target.value);
+                document.getElementById('approachPointValue').textContent = approachPoint.toFixed(1);
+                drawGraph();
+            });
+        }
+
+        // 更新步骤高亮
+        function updateStepHighlight(step) {
+            currentStep = step;
+            document.querySelectorAll('.step-card').forEach((card, index) => {
+                const cardStep = index + 1;
+                card.classList.remove('active', 'completed');
+                
+                if (cardStep < step) {
+                    card.classList.add('completed');
+                    card.querySelector('.step-status').innerHTML = '<span class="text-green-500 text-xl">✓</span>';
+                } else if (cardStep === step) {
+                    card.classList.add('active');
+                    card.querySelector('.step-status').innerHTML = '';
+                } else {
+                    card.querySelector('.step-status').innerHTML = '';
+                }
+            });
+
+            // 更新步骤编号颜色
+            document.querySelectorAll('.step-number').forEach((num, index) => {
+                if (index + 1 < step) {
+                    num.classList.remove('bg-gray-400');
+                    num.classList.add('bg-green-500');
+                } else if (index + 1 === step) {
+                    num.classList.remove('bg-gray-400');
+                    num.classList.add('bg-indigo-500');
+                } else {
+                    num.classList.remove('bg-indigo-500', 'bg-green-500');
+                    num.classList.add('bg-gray-400');
+                }
+            });
+
+            // 显示进度消息
+            showProgressMessage(step);
+        }
+
+        // 显示进度消息
+        function showProgressMessage(step) {
+            const messageDiv = document.getElementById('progressMessage');
+            const messageText = messageDiv.querySelector('p');
+            messageDiv.classList.remove('hidden');
+            
+            const messages = {
+                1: '太棒了！现在开始识别极限类型。观察函数在趋近点附近的行为。',
+                2: '很好！现在检查极限存在的条件。注意左右极限是否相等。',
+                3: '完美！最后一步是使用合适的公式计算极限值。'
+            };
+            
+            messageText.textContent = messages[step];
+            
+            setTimeout(() => {
+                messageDiv.classList.add('hidden');
+            }, 3000);
+        }
+
+        // 绘制函数图像
+        function drawGraph() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制坐标轴
+            ctx.strokeStyle = '#9ca3af';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height / 2);
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+
+            // 绘制函数曲线
+            ctx.strokeStyle = functions[currentFunction].color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let px = 0; px < canvas.width; px++) {
+                const x = (px - canvas.width / 2) / 50;
+                const y = functions[currentFunction].func(x);
+                
+                if (!isNaN(y) && isFinite(y)) {
+                    const py = canvas.height / 2 - y * 50;
+                    if (px === 0) {
+                        ctx.moveTo(px, py);
+                    } else {
+                        ctx.lineTo(px, py);
+                    }
+                }
+            }
+            ctx.stroke();
+
+            // 标记趋近点
+            const approachX = approachPoint;
+            const approachY = functions[currentFunction].func(approachX);
+            
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2 + approachX * 50, canvas.height / 2 - approachY * 50, 5, 0, 2 * Math.PI);
+            ctx.fill();
+
+            // 标记当前点
+            if (xValue !== undefined) {
+                const currentY = functions[currentFunction].func(xValue);
+                ctx.fillStyle = functions[currentFunction].color;
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2 + xValue * 50, canvas.height / 2 - currentY * 50, 4, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+
+        // 开始模拟
+        function startSimulation() {
+            if (animationId) return;
+            isPaused = false;
+            animate();
+        }
+
+        // 暂停模拟
+        function pauseSimulation() {
+            isPaused = true;
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+
+        // 重置模拟
+        function resetSimulation() {
+            pauseSimulation();
+            xValue = 0;
+            direction = 1;
+            updateStepHighlight(1);
+            updateDataDisplay();
+            drawGraph();
+        }
+
+        // 动画循环
+        function animate() {
+            if (!isPaused) {
+                // 更新x值
+                xValue += 0.02 * direction;
+                
+                // 接近趋近点时改变方向
+                if (Math.abs(xValue - approachPoint) < 0.1) {
+                    direction = -direction;
+                    updateStepHighlight(2);
+                }
+                
+                // 到达端点时重置
+                if (xValue > 3 || xValue < -3) {
+                    xValue = 0;
+                    updateStepHighlight(3);
+                }
+                
+                // 更新显示
+                updateDataDisplay();
+                drawGraph();
+                
+                animationId = requestAnimationFrame(animate);
+            }
+        }
+
+        // 更新数据显示
+        function updateDataDisplay() {
+            const fValue = functions[currentFunction].func(xValue);
+            
+            document.getElementById('currentX').textContent = xValue.toFixed(3);
+            document.getElementById('currentF').textContent = fValue.toFixed(3);
+            
+            // 计算左右极限
+            const leftLimit = functions[currentFunction].func(approachPoint - 0.001);
+            const rightLimit = functions[currentFunction].func(approachPoint + 0.001);
+            
+            document.getElementById('leftLimit').textContent = leftLimit.toFixed(3);
+            document.getElementById('rightLimit').textContent = rightLimit.toFixed(3);
+        }
+
+        // 初始化应用
+        init();
+    </script>
+</body>
+</html>

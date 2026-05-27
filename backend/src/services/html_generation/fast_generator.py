@@ -355,7 +355,7 @@ class FastGenerator(BaseGenerator):
                 if result is not None:
                     return result
 
-            elif backend == 'zhipu' and hasattr(self.provider, '_run_zhipu_call'):
+            elif backend in ('zhipu', 'openai_compat') and hasattr(self.provider, '_run_zhipu_call'):
                 result = await _call_zhipu()
                 if result is not None:
                     return result

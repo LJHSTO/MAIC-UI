@@ -211,7 +211,7 @@ class TestEnglishProvider:
             assert hasattr(provider, 'api_key')
             assert hasattr(provider, 'model')
             assert hasattr(provider, 'base_url')
-            assert provider.base_url == "https://chatapi.onechats.ai/v1beta"
+            assert provider.base_url == "https://api.siliconflow.cn/v1beta"
 
             print("   ✅ English provider base URL configured")
             print("   ✅ API key and model attributes present")
@@ -282,4 +282,4 @@ if __name__ == "__main__":
     print("   Features: Unified Gemini + OpenAI support via Chinese API")
     print("   Models: gemini-3-pro-image-preview, gpt-4.1, and more")
     print("   Usage: Set AI_PROVIDER=english/gemini/openai in .env file")
-    print("   API: Uses https://chatapi.onechats.ai/v1beta middle-transfer service")
+    print("   API: Uses https://api.siliconflow.cn/v1beta unified proxy")

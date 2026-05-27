@@ -4,14 +4,13 @@ import React, { useEffect, useState } from 'react'
 import Cookies from 'js-cookie'
 import { useRouter } from 'next/navigation'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
-import { useModelSettings, ZhipuModel } from '@/components/providers/ModelSettingsProvider'
+import { useModelSettings, AIModel } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage, Language } from '@/components/providers/LanguageProvider'
 import TemplateBrowser from '@/components/templates/TemplateBrowser'
 
 const API_BASE_URL =
-  process.env.NODE_ENV === 'production'
-    ? '/api'
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
 interface DocumentItem {
   id: number
@@ -33,9 +32,16 @@ export default function TemplatesPage() {
     { value: 'en', label: 'English' },
   ]
 
-  const models: { value: ZhipuModel; label: string; description: string }[] = [
+  const models: { value: AIModel; label: string; description: string }[] = [
     { value: 'glm-4.7', label: 'GLM-4.7', description: t('model.glm47_desc') },
-    { value: 'glm-4.6', label: 'GLM-4.6', description: t('model.glm46_desc') }
+    { value: 'glm-4.6', label: 'GLM-4.6', description: t('model.glm46_desc') },
+    { value: 'gpt-5', label: 'GPT-5', description: t('model.gpt5_desc') },
+    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: t('model.deepseek_v4_flash_desc') },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', description: t('model.gemini_flash_desc') },
+    { value: 'kimi-k2.6', label: 'Kimi K2.6', description: t('model.kimi_k26_desc') },
+    { value: 'glm-5.1', label: 'GLM-5.1', description: t('model.glm51_desc') },
+    { value: 'minimax-m2.5', label: 'MiniMax M2.5', description: t('model.minimax_m25_desc') },
+    { value: 'qwen3.6-35b-a3b', label: 'Qwen3.6 35B A3B', description: t('model.qwen36_35b_a3b_desc') },
   ]
 
   useEffect(() => {

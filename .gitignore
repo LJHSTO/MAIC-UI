@@ -258,3 +258,30 @@ dmypy.json
 *.tar
 *.tgz
 *.tar.xz
+# === MAIC-UI specific additions ===
+
+# Personal launchers (hardcoded local paths)
+launch_frontend.py
+run_backend.py
+run_backend.bat
+run_frontend.py
+start_backend.bat
+
+# Local batch config (contains credentials)
+.env.batch
+
+# Screenshots
+model-dropdown.png
+
+# Generated batch outputs
+maic_outputs/
+maic_batch_outputs/
+
+# Duplicate lockfile (use npm)
+pnpm-lock.yaml
+frontend/pnpm-lock.yaml
+
+# Persistent venv
+backend/venv/
+AGENTS.md
+backend/learn_your_way.db.bak*

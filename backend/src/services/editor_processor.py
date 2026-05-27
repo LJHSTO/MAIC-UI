@@ -10,6 +10,7 @@ import time
 import asyncio
 import logging
 import re
+import httpx
 
 # Import segmented reading and diff modification modules
 from .read import build_full_content_prompt
@@ -34,13 +35,120 @@ except ImportError:
     ANTHROPIC_AVAILABLE = False
     logger.warning("Anthropic SDK not available. Install with: pip install anthropic")
 
+# Import OpenAI SDK for transfer station support
+try:
+    from openai import OpenAI as OpenAIClient
+    OPENAI_SDK_AVAILABLE = True
+except ImportError:
+    OPENAI_SDK_AVAILABLE = False
+    logger.warning("OpenAI SDK not available. Install with: pip install openai")
+
+
+# Import Gemini client adapter
+from .ai_processor import GeminiClient
+
 
 class ChineseEditorProvider:
-    """Unified Chinese AI provider for HTML editing, supporting both Anthropic and Zhipu models."""
+    """Unified Chinese AI provider for HTML editing, supporting Anthropic, Zhipu, and OpenAI-compatible models."""
 
     # Model detection
-    ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"]
-    ZHIPU_MODELS = ["glm-4.7", "glm-4.6"]
+    ANTHROPIC_MODELS = []  # Claude now goes through uuapi (openai_compat), not Anthropic SDK
+    ZHIPU_MODELS = ["glm-4.7"]
+    OPENAI_COMPAT_MODELS = [
+        # Claude (via uuapi)
+        "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+        # OpenAI GPT (via uuapi)
+        "gpt-5.4", "gpt-5.5",
+        # DeepSeek
+        "deepseek-v4-pro", "deepseek-v4-flash",
+        # Gemini (via uuapi)
+        "gemini-3.1-pro",
+        # Kimi
+        "kimi-k2.6",
+        # GLM (via Zhipu OpenAI-compatible API)
+        "glm-4.7",
+        # Others (via SiliconFlow)
+        "minimax-m2.5", "qwen3.6-35b-a3b",
+    ]
+
+    # Internal name → SiliconFlow API model ID mapping
+    SILICONFLOW_MODEL_MAP = {
+        "minimax-m2.5": "MiniMaxAI/MiniMax-M2.5",
+        "qwen3.6-35b-a3b": "Qwen/Qwen3.6-35B-A3B",
+    }
+
+    # Model categories for routing to different API proxies
+    CLAUDE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
+    GPT_MODELS = ["gpt-5.4", "gpt-5.5"]
+    GEMINI_MODELS = ["gemini-3.1-pro"]
+    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"]
+    ZHIPU_MODELS = ["glm-4.7"]
+    KIMI_MODELS = ["kimi-k2.6"]
+
+    def _resolve_model(self, model: str) -> str:
+        """Resolve internal model name to actual API model ID."""
+        if self.backend == "openai_compat":
+            # GLM pass through (Zhipu OpenAI-compatible API)
+            if model in self.ZHIPU_MODELS:
+                return model
+            # DeepSeek model ID mapping for official API
+            if model in self.DEEPSEEK_MODELS:
+                return self.DEEPSEEK_MODEL_MAP.get(model, model)
+            # Kimi pass through (Moonshot API handles it)
+            if model in self.KIMI_MODELS:
+                return model
+            # Claude pass through (uuapi handles it with same model names)
+            if model in self.CLAUDE_MODELS:
+                return model
+            # GPT pass through (uuapi handles it)
+            if model in self.GPT_MODELS:
+                return model
+            # Gemini → use appropriate model map based on provider type
+            if model in self.GEMINI_MODELS:
+                # Check if using uuapi (OpenAI-compatible) or Google SDK
+                if self.gemini_client is not None and not isinstance(self.gemini_client, GeminiClient):
+                    return self.GEMINI_UUAPI_MODEL_MAP.get(model, model)
+                return self.GEMINI_MODEL_MAP.get(model, model)
+            # Others → SiliconFlow mapping
+            return self.SILICONFLOW_MODEL_MAP.get(model, model)
+        return model
+
+    # Internal name → Google Gemini API model ID mapping
+    GEMINI_MODEL_MAP = {
+        "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3.5-flash": "gemini-3.5-flash",
+        "gemini-3-flash-preview": "gemini-3-flash-preview",
+        "gemini-2.5-pro": "gemini-2.5-pro",
+    }
+
+    # Internal name → uuapi Gemini model ID mapping
+    GEMINI_UUAPI_MODEL_MAP = {
+        "gemini-3.1-pro": "gemini-3.1-pro-high",
+    }
+
+    # Internal name → DeepSeek API model name mapping
+    DEEPSEEK_MODEL_MAP = {
+        "deepseek-v4-pro": "deepseek-reasoner",
+        "deepseek-v4-flash": "deepseek-chat",
+    }
+
+    def _get_client_for_model(self, model: str):
+        """Get the appropriate OpenAI client based on model category."""
+        if self.backend != "openai_compat":
+            return self.openai_client
+        if model in self.CLAUDE_MODELS and self.claude_client is not None:
+            return self.claude_client
+        if model in self.GPT_MODELS and self.gpt_client is not None:
+            return self.gpt_client
+        if model in self.GEMINI_MODELS and self.gemini_client is not None:
+            return self.gemini_client
+        if model in self.ZHIPU_MODELS and self.zhipu_oa_client is not None:
+            return self.zhipu_oa_client
+        if model in self.DEEPSEEK_MODELS and self.deepseek_client is not None:
+            return self.deepseek_client
+        if model in self.KIMI_MODELS and self.kimi_client is not None:
+            return self.kimi_client
+        return self.openai_client
 
     def __init__(
         self,
@@ -53,8 +161,8 @@ class ChineseEditorProvider:
 
         Args:
             api_key: API key. If not provided, auto-detects from environment based on model.
-            model: Model to use. Determines which backend (Anthropic vs Zhipu) to use.
-            base_url: Optional base URL for Anthropic API (for proxy usage).
+            model: Model to use. Determines which backend (Anthropic, Zhipu, or openai_compat) to use.
+            base_url: Optional base URL for API proxy.
         """
         self.model = model
         self.backend = self._detect_backend(model)
@@ -62,12 +170,15 @@ class ChineseEditorProvider:
         # Auto-detect API key based on backend
         if not api_key:
             if self.backend == "anthropic":
-                api_key = os.getenv("ANTHROPIC_API_KEY")
+                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+            elif self.backend == "openai_compat":
+                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
             else:
-                api_key = os.getenv("ZHIPU_API_KEY")
+                api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
 
         if not api_key:
-            env_var = "ANTHROPIC_API_KEY" if self.backend == "anthropic" else "ZHIPU_API_KEY"
+            env_var_map = {"anthropic": "TRANSFER_API_KEY", "openai_compat": "TRANSFER_API_KEY", "zhipu": "ZHIPU_API_KEY"}
+            env_var = env_var_map.get(self.backend, "TRANSFER_API_KEY")
             raise ValueError(f"API key not provided. Set {env_var} environment variable or pass api_key parameter.")
 
         # Initialize appropriate client
@@ -76,26 +187,121 @@ class ChineseEditorProvider:
                 raise ImportError("Anthropic SDK not installed. Install with: pip install anthropic")
 
             client_kwargs = {"api_key": api_key}
+            # Derive Anthropic base URL from TRANSFER_BASE_URL (strip /v1 suffix)
             if base_url:
                 client_kwargs["base_url"] = base_url
-            elif os.getenv("ANTHROPIC_BASE_URL"):
-                client_kwargs["base_url"] = os.getenv("ANTHROPIC_BASE_URL")
+            else:
+                transfer_url = os.getenv("TRANSFER_BASE_URL", "")
+                if transfer_url:
+                    client_kwargs["base_url"] = transfer_url.replace("/v1", "")
+                elif os.getenv("ANTHROPIC_BASE_URL"):
+                    client_kwargs["base_url"] = os.getenv("ANTHROPIC_BASE_URL")
 
             self.anthropic_client = Anthropic(**client_kwargs)
             self.zhipu_client = None
+            self.openai_client = None
+            self.gpt_client = None
+            self.claude_client = None
+            self.zhipu_oa_client = None
+            self.deepseek_client = None
+            self.gemini_client = None
+            self.kimi_client = None
             logger.info(f"🎨 ChineseEditorProvider initialized with Anthropic backend, model: {self.model}")
+
+        elif self.backend == "openai_compat":
+            if not OPENAI_SDK_AVAILABLE:
+                raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
+
+            # Main client: SiliconFlow
+            compat_base_url = base_url or os.getenv("TRANSFER_BASE_URL", "https://api.siliconflow.cn/v1")
+            self.openai_client = OpenAIClient(api_key=api_key, base_url=compat_base_url)
+            self.anthropic_client = None
+            self.zhipu_client = None
+
+            # GPT client: uuapi.net
+            gpt_key = os.getenv("GPT_API_KEY")
+            gpt_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
+            if gpt_key:
+                self.gpt_client = OpenAIClient(api_key=gpt_key, base_url=gpt_url)
+                logger.info(f"🎨 GPT client initialized via uuapi: {gpt_url}")
+            else:
+                self.gpt_client = None
+
+            # Claude client: uuapi.net
+            claude_key = os.getenv("ANTHROPIC_API_KEY")
+            claude_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
+            if claude_key:
+                self.claude_client = OpenAIClient(api_key=claude_key, base_url=claude_url)
+                logger.info(f"🎨 Claude client initialized via uuapi: {claude_url}")
+            else:
+                self.claude_client = None
+
+            # Gemini client: auto-detect uuapi (OpenAI-compatible) vs Google official API
+            gemini_key = os.getenv("GEMINI_API_KEY")
+            gemini_url = os.getenv("GEMINI_BASE_URL", "https://uuapi.net/v1")
+            if gemini_key:
+                if "uuapi.net" in gemini_url:
+                    # uuapi is OpenAI-compatible, use regular OpenAIClient
+                    self.gemini_client = OpenAIClient(api_key=gemini_key, base_url=gemini_url)
+                    logger.info(f"🎨 Gemini client initialized via uuapi (OpenAI-compat): {gemini_url}")
+                else:
+                    # Google official API, use GeminiClient adapter
+                    self.gemini_client = GeminiClient(api_key=gemini_key, base_url=gemini_url)
+                    logger.info(f"🎨 Gemini client initialized via Google API: {gemini_url}")
+            else:
+                self.gemini_client = None
+
+            # Zhipu client: open.bigmodel.cn (OpenAI-compatible)
+            zhipu_key = os.getenv("ZHIPU_API_KEY")
+            zhipu_url = "https://open.bigmodel.cn/api/paas/v4"
+            if zhipu_key:
+                self.zhipu_oa_client = OpenAIClient(api_key=zhipu_key, base_url=zhipu_url)
+                logger.info(f"🎨 Zhipu GLM client initialized via OpenAI-compat: {zhipu_url}")
+            else:
+                self.zhipu_oa_client = None
+
+            # DeepSeek client: api.deepseek.com
+            deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+            deepseek_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            if deepseek_key:
+                self.deepseek_client = OpenAIClient(api_key=deepseek_key, base_url=deepseek_url)
+                logger.info(f"🎨 DeepSeek client initialized via official API: {deepseek_url}")
+            else:
+                self.deepseek_client = None
+
+            # Kimi client: api.moonshot.cn
+            kimi_key = os.getenv("KIMI_API_KEY")
+            kimi_url = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+            if kimi_key:
+                self.kimi_client = OpenAIClient(api_key=kimi_key, base_url=kimi_url)
+                logger.info(f"🎨 Kimi client initialized via moonshot: {kimi_url}")
+            else:
+                self.kimi_client = None
+
+            self.anthropic_client = None
+            self.zhipu_client = None
+            logger.info(f"🎨 ChineseEditorProvider initialized with OpenAI-compat backend, model: {self.model}, base_url: {compat_base_url}")
+
         else:  # zhipu
             if not ZHIPU_AVAILABLE:
                 raise ImportError("Zhipu AI SDK not installed. Install with: pip install zai-sdk")
 
             self.zhipu_client = ZhipuAiClient(api_key=api_key)
             self.anthropic_client = None
+            self.openai_client = None
+            self.gpt_client = None
+            self.claude_client = None
+            self.zhipu_oa_client = None
+            self.deepseek_client = None
+            self.gemini_client = None
+            self.kimi_client = None
             logger.info(f"🎨 ChineseEditorProvider initialized with Zhipu backend, model: {self.model}")
 
     def _detect_backend(self, model: str) -> str:
         """Detect which backend to use based on model name."""
-        if model.startswith("claude-") or model in self.ANTHROPIC_MODELS:
-            return "anthropic"
+        # Claude models now go through uuapi (openai_compat), not Anthropic SDK
+        if model in self.OPENAI_COMPAT_MODELS:
+            return "openai_compat"
         return "zhipu"  # Default to Zhipu
 
     def _format_citations(self, citations: List[Dict], original_html: str = "") -> str:
@@ -227,6 +433,10 @@ class ChineseEditorProvider:
 
     async def _run_zhipu_call(self, model: str, messages: List[Dict], thinking_params: Optional[Dict] = None) -> Any:
         """Run synchronous Zhipu API call in a thread pool to avoid blocking the event loop."""
+        # Redirect to openai_compat if that's the active backend
+        if self.backend == "openai_compat" and getattr(self, 'openai_client', None) is not None:
+            return await self._run_openai_compat_call(model, messages)
+
         if self.zhipu_client is None:
             raise RuntimeError("Zhipu client not initialized. This provider is configured for Anthropic.")
 
@@ -243,6 +453,32 @@ class ChineseEditorProvider:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, _make_sync_call)
 
+    async def _run_openai_compat_call(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None) -> Any:
+        """Run OpenAI-compatible API call via appropriate transfer station.
+
+        Routes to: SiliconFlow (DeepSeek/GLM/Kimi/MiniMax/Qwen) or uuapi (GPT/Gemini).
+        """
+        if self.openai_client is None:
+            raise RuntimeError("OpenAI-compat client not initialized.")
+
+        # Resolve internal model name to API model ID
+        resolved_model = self._resolve_model(model)
+        # Route to correct client based on model category
+        client = self._get_client_for_model(model)
+
+        def _make_sync_call():
+            params = {
+                "model": resolved_model,
+                "messages": messages,
+                "timeout": 600.0,  # 10 minutes timeout to prevent indefinite hanging
+            }
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+            return client.chat.completions.create(**params)
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _make_sync_call)
+
     async def _run_anthropic_call(self, model: str, messages: List[Dict], max_tokens: int = 16000, thinking_enabled: bool = False) -> Any:
         """Run synchronous Anthropic API call in a thread pool to avoid blocking the event loop."""
         if self.anthropic_client is None:
@@ -252,7 +488,8 @@ class ChineseEditorProvider:
             params = {
                 "model": model,
                 "max_tokens": max_tokens,
-                "messages": messages
+                "messages": messages,
+                "timeout": 600.0,  # 10 minutes timeout to prevent indefinite hanging
             }
             if thinking_enabled and "claude-3-7" in model:
                 params["thinking"] = {
@@ -457,8 +694,13 @@ _editor_processor_instance = None
 
 
 # Model to provider mapping
-CHINESE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001",
-                  "glm-4.7", "glm-4.6"]
+CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+                  "glm-4.7",
+                  "gpt-5.4", "gpt-5.5",
+                  "deepseek-v4-pro", "deepseek-v4-flash",
+                  "gemini-3.1-pro",
+                  "kimi-k2.6",
+                  "minimax-m2.5", "qwen3.6-35b-a3b"]
 
 
 def get_editor_processor(
@@ -472,14 +714,17 @@ def get_editor_processor(
     Otherwise, returns a cached global instance using environment variable configuration.
 
     Supported models (all use unified ChineseEditorProvider with auto-detected backend):
-    - Anthropic backend: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
-    - Zhipu backend: glm-4.7, glm-4.6
+    - Anthropic backend: claude-sonnet-4-6, claude-opus-4-6
+    - Zhipu backend: glm-4.7
+    - Transfer station: gpt-5.4, gpt-5.5, deepseek-v4-pro, gemini-3.1-pro, kimi-k2.6, minimax-m2.5, qwen3.6-35b-a3b
 
     Environment variables:
     - EDITOR_PROVIDER: Provider type - "chinese" (default: chinese)
     - ZHIPU_API_KEY: Required if using Zhipu models
-    - ANTHROPIC_API_KEY: Required if using Anthropic models
-    - ANTHROPIC_BASE_URL: Optional base URL for Anthropic API proxy
+    - TRANSFER_API_KEY: Required if using Anthropic or OpenAI-compatible models via transfer station
+    - TRANSFER_BASE_URL: Optional base URL for transfer station
+    - ANTHROPIC_API_KEY: Legacy, falls back to TRANSFER_API_KEY
+    - ANTHROPIC_BASE_URL: Legacy, derived from TRANSFER_BASE_URL
     - EDITOR_MODEL: Optional model name (defaults to glm-4.7)
 
     Args:
@@ -532,16 +777,25 @@ def _create_editor_processor(
     final_model = model or os.getenv("EDITOR_MODEL", "glm-4.7")
 
     # Determine API key based on model name (auto-detect backend)
-    if final_model.startswith("claude-") or final_model in ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"]:
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+    if final_model.startswith("claude-") or final_model in ["claude-sonnet-4-6", "claude-opus-4-6"]:
+        api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(
-                "ANTHROPIC_API_KEY environment variable is not configured. "
-                "Please set ANTHROPIC_API_KEY to use Anthropic models."
+                "TRANSFER_API_KEY environment variable is not configured. "
+                "Please set TRANSFER_API_KEY to use Anthropic models via transfer station."
             )
-        base_url = os.getenv("ANTHROPIC_BASE_URL")
+        transfer_url = os.getenv("TRANSFER_BASE_URL", "")
+        base_url = transfer_url.replace("/v1", "") if transfer_url else os.getenv("ANTHROPIC_BASE_URL")
+    elif final_model in ChineseEditorProvider.OPENAI_COMPAT_MODELS:
+        api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "TRANSFER_API_KEY environment variable is not configured. "
+                "Please set TRANSFER_API_KEY to use OpenAI-compatible models."
+            )
+        base_url = os.getenv("TRANSFER_BASE_URL")
     else:
-        api_key = os.getenv("ZHIPU_API_KEY")
+        api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
         if not api_key:
             raise ValueError(
                 "ZHIPU_API_KEY environment variable is not configured. "

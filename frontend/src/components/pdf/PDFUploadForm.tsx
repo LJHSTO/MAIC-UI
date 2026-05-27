@@ -9,9 +9,8 @@ import { ConceptInputForm } from './ConceptInputForm'
 import PPTUploadForm from '@/components/ppt-viewer/PPTUploadForm'
 
 const API_BASE_URL =
-  process.env.NODE_ENV === 'production'
-    ? '/api'
-    : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
 interface UploadResponse {
   id: number

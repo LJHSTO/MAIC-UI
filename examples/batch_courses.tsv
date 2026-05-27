@@ -1,0 +1,4 @@
+id	type	input	title	subject	grade	model	public	mode	language
+concept_derivative	concept	concept_derivative.json	Derivative as rate of change	math	11	glm-4.7	false	heavy	zh
+# pdf_quadratic	pdf	../materials/quadratic_functions.pdf	Quadratic Functions	math	10	glm-4.7	false	heavy	zh
+# ppt_probability	ppt	../materials/probability.pptx	Probability Introduction	math	10	glm-4.7	false	heavy	zh

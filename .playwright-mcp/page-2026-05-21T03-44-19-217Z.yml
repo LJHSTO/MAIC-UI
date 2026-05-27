@@ -1,0 +1,62 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - generic [ref=e6]:
+          - generic [ref=e7]: MAIC-UI
+          - generic [ref=e8]:
+            - generic [ref=e9]: "|"
+            - generic [ref=e10]: Where knowledge grows, interfaces bloom. Where interaction flows, thinking deepens.
+        - link "Sign Up" [ref=e11] [cursor=pointer]:
+          - /url: /register
+          - button "Sign Up" [ref=e12]
+    - generic [ref=e13]:
+      - generic [ref=e15]:
+        - heading "MAIC-UI" [level=1] [ref=e16]
+        - heading "全学段AI交互式教学生成系统" [level=2] [ref=e17]
+        - paragraph [ref=e18]: 让知识生长出界面 让交互渗透进思维
+        - generic [ref=e19]:
+          - link "开始体验" [ref=e20] [cursor=pointer]:
+            - /url: /register
+            - button "开始体验" [ref=e21]
+          - link "登录" [ref=e22] [cursor=pointer]:
+            - /url: /login
+            - button "登录" [ref=e23]
+      - img "AI课堂场景" [ref=e29]
+    - generic [ref=e30]:
+      - generic:
+        - img
+      - button "Scroll down" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+      - generic [ref=e34]:
+        - generic [ref=e35]:
+          - img "先读懂知识 再生成课件 icon" [ref=e37]
+          - heading "先读懂知识 再生成课件" [level=3] [ref=e38]
+          - paragraph [ref=e39]: SMART PARSING
+          - paragraph [ref=e40]: 不是把文字丢给AI，而是先理解知识点的关系和重点，再生成课件——就像先备课再上课
+        - generic [ref=e41]:
+          - img "三步走 稳稳不出错 icon" [ref=e43]
+          - heading "三步走 稳稳不出错" [level=3] [ref=e44]
+          - paragraph [ref=e45]: STEP-BY-STEP GENERATION
+          - paragraph [ref=e46]: 先定结构、再填内容、最后加交互，像搭积木一样一步步来，不会一口气生成一堆乱的东西
+        - generic [ref=e47]:
+          - img "哪里不满意改哪里 icon" [ref=e49]
+          - heading "哪里不满意改哪里" [level=3] [ref=e50]
+          - paragraph [ref=e51]: INCREMENTAL EDITING
+          - paragraph [ref=e52]: 不需要整页重新生成，像用橡皮擦一样，改哪里擦哪里，老师调整内容省时又省力
+        - generic [ref=e53]:
+          - img "知识点自动长成可玩的页面 icon" [ref=e55]
+          - heading "知识点自动长成可玩的页面" [level=3] [ref=e56]
+          - paragraph [ref=e57]: GENERATIVE UI
+          - paragraph [ref=e58]: 输入知识点，AI自动生成能点击、能操作的交互界面，学生不是在看，而是在"动手"学
+        - generic [ref=e59]:
+          - img "教完就能练 练完有反馈 icon" [ref=e61]
+          - heading "教完就能练 练完有反馈" [level=3] [ref=e62]
+          - paragraph [ref=e63]: TEACH-LEARN-PRACTICE LOOP
+          - paragraph [ref=e64]: 老师备课、学生学习一套系统搞定，教、学、练、评无缝衔接，形成真正闭环
+        - generic [ref=e65]:
+          - img "抽象难懂的 动起来就明白 icon" [ref=e67]
+          - heading "抽象难懂的 动起来就明白" [level=3] [ref=e68]
+          - paragraph [ref=e69]: DYNAMIC VISUALIZATION
+          - paragraph [ref=e70]: 把复杂的概念和步骤变成动态可视化过程，学生不再对着文字发呆，一步步看就能懂
+  - alert [ref=e71]

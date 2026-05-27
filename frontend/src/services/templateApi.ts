@@ -4,7 +4,6 @@
  * Handles all API calls for template-based content generation.
  */
 
-import Cookies from 'js-cookie';
 import type {
   TemplateSearchResult,
   TemplateGenerateResult,
@@ -20,20 +19,22 @@ import type {
   WebsiteConceptContentInfo
 } from '../lib/templateTypes';
 
-// In production, use relative path /api; in development use localhost:8000/api
-const API_URL = process.env.NODE_ENV === 'production' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+// Prefer an explicit backend URL; otherwise use relative /api in production.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
 // Helper to build API URLs
 const buildUrl = (path: string) => `${API_URL}${path}`;
 
 /**
- * Get auth token from cookies
+ * Get auth token from localStorage (consistent with lib/api.ts)
  */
 function getAuthHeader(): HeadersInit {
-  const token = typeof window !== 'undefined' ? Cookies.get('access_token') : null;
-  return {
-    'Authorization': `Bearer ${token}`,
-  };
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
 }
 
 /**

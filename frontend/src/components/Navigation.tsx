@@ -7,7 +7,7 @@ import { useModelSettings, AIModel } from '@/components/providers/ModelSettingsP
 
 interface NavigationProps {
   user?: {
-    full_name?: string
+    full_name?: string | null
     username?: string
   }
   onLogout?: () => void
@@ -33,14 +33,14 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
     {
       value: 'glm-4.7',
       label: 'GLM-4.7',
-      description: '优先使用获得最佳效果',
+      description: '智谱旗舰，优先使用获得最佳效果',
       provider: 'Zhipu'
     },
     {
-      value: 'glm-4.6',
-      label: 'GLM-4.6',
-      description: '如遇并发限制可切换',
-      provider: 'Zhipu'
+      value: 'claude-opus-4-7',
+      label: 'Claude Opus 4.7',
+      description: '最新旗舰推理模型',
+      provider: 'Anthropic'
     },
     {
       value: 'claude-opus-4-6',
@@ -55,10 +55,52 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
       provider: 'Anthropic'
     },
     {
-      value: 'claude-haiku-4-5-20251001',
-      label: 'Claude Haiku 4.5',
-      description: '快速响应，适合简单任务',
-      provider: 'Anthropic'
+      value: 'gpt-5.4',
+      label: 'GPT-5.4',
+      description: 'OpenAI 旗舰，性价比高',
+      provider: 'OpenAI'
+    },
+    {
+      value: 'gpt-5.5',
+      label: 'GPT-5.5',
+      description: 'OpenAI 最新旗舰',
+      provider: 'OpenAI'
+    },
+    {
+      value: 'deepseek-v4-pro',
+      label: 'DeepSeek V4 Pro',
+      description: 'DeepSeek 旗舰，1M上下文',
+      provider: 'DeepSeek'
+    },
+    {
+      value: 'deepseek-v4-flash',
+      label: 'DeepSeek V4 Flash',
+      description: 'DeepSeek 高速经济之选',
+      provider: 'DeepSeek'
+    },
+    {
+      value: 'gemini-3.1-pro',
+      label: 'Gemini 3.1 Pro',
+      description: 'Google 最强推理模型',
+      provider: 'Google'
+    },
+    {
+      value: 'kimi-k2.6',
+      label: 'Kimi K2.6',
+      description: '月之暗面最新多模态模型',
+      provider: 'Moonshot'
+    },
+    {
+      value: 'minimax-m2.5',
+      label: 'MiniMax M2.5',
+      description: 'MiniMax 最新多模态模型',
+      provider: 'MiniMax'
+    },
+    {
+      value: 'qwen3.6-35b-a3b',
+      label: 'Qwen3.6 35B A3B',
+      description: '通义千问最新旗舰模型',
+      provider: 'Qwen'
     },
   ]
 
@@ -160,6 +202,34 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
                           </div>
                           {selectedModel === model.value && (
                             <svg className="w-5 h-5 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                    {/* Other Models (via Transfer Station) */}
+                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-50 border-b border-t border-gray-200">
+                      其他模型 (中转站)
+                    </div>
+                    {models.filter(m => !['Zhipu', 'Anthropic'].includes(m.provider)).map((model) => (
+                      <button
+                        key={model.value}
+                        onClick={() => {
+                          setSelectedModel(model.value)
+                          setIsModelDropdownOpen(false)
+                        }}
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
+                          selectedModel === model.value ? 'bg-green-50 border-l-4 border-green-600' : ''
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-semibold text-gray-900">{model.label}</div>
+                            <div className="text-xs text-gray-500 mt-1">{model.description}</div>
+                          </div>
+                          {selectedModel === model.value && (
+                            <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
                               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                             </svg>
                           )}

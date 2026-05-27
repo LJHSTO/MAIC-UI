@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学习星球：程序性知识探索</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+            background-color: #f0f4f8;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 20%),
+                radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 20%);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c7c7cc; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+        /* Step Animations */
+        .step-card {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            border-left: 4px solid transparent;
+        }
+        
+        .step-active {
+            transform: translateX(10px);
+            background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+            border-left: 4px solid #10b981;
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.1), 0 4px 6px -2px rgba(16, 185, 129, 0.05);
+        }
+
+        .step-completed {
+            border-left: 4px solid #3b82f6;
+            opacity: 0.8;
+        }
+
+        /* Connecting Line Animation */
+        .connecting-line {
+            position: absolute;
+            left: 24px;
+            top: 48px;
+            bottom: 0;
+            width: 2px;
+            background: #e5e7eb;
+            z-index: 0;
+        }
+
+        .connecting-line-progress {
+            width: 100%;
+            background: linear-gradient(to bottom, #3b82f6, #10b981);
+            transition: height 0.5s ease;
+        }
+
+        /* Simulation Styles */
+        .canvas-container {
+            background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            border-radius: 16px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+        }
+
+        .control-knob {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #e2e8f0;
+            outline: none;
+            transition: background .2s;
+        }
+        
+        .control-knob::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.2);
+            transition: transform 0.2s;
+        }
+        
+        .control-knob::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+        }
+
+        /* Floating particles in simulation */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .floating-ui {
+            animation: float 4s ease-in-out infinite;
+        }
+
+        .glow-text {
+            text-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xl shadow-lg shadow-indigo-200">
+                    <i class="fa-solid fa-graduation-cap"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-black tracking-tight text-slate-900">程序性知识探索</h1>
+                    <p class="text-xs text-slate-500 font-medium">小学六年级 · 综合教育 · 交互式模拟</p>
+                </div>
+            </div>
+            <div class="hidden md:flex items-center gap-4">
+                <div class="bg-slate-100 px-4 py-2 rounded-full text-sm font-bold text-slate-600 flex items-center gap-2">
+                    <i class="fa-solid fa-bullseye text-indigo-500"></i>
+                    学习目标：理解材料
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8 flex-grow">
+        <!-- Intro Section -->
+        <div class="mb-8 text-center max-w-2xl mx-auto">
+            <h2 class="text-3xl font-black text-slate-800 mb-2">基本学习过程模拟</h2>
+            <p class="text-slate-600 leading-relaxed text-lg">
+                欢迎来到“学习星球”！通过右侧的<span class="text-indigo-600 font-bold">交互式模拟</span>，
+                你将亲身体验如何像科学家一样<strong>理解</strong>知识、<strong>练习</strong>技能，并<strong>检查</strong>自己的掌握程度。
+                <br><span class="text-sm text-slate-400 mt-2 block">（提示：跟随左侧的步骤指引，调整参数，观察变化。）</span>
+            </p>
+        </div>
+
+        <!-- Main Grid Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+            <!-- LEFT PANEL: Process Display -->
+            <div class="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden relative">
+                <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+                    <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-list-ol text-indigo-500"></i>
+                        学习过程导航
+                    </h3>
+                </div>
+
+                <div class="p-6 relative min-h-[400px]">
+                    <!-- Vertical Connecting Line Background -->
+                    <div class="connecting-line"></div>
+                    <div id="lineProgress" class="connecting-line-progress absolute left-6 top-12 w-0.5 h-0 bg-gradient-to-b from-blue-500 to-emerald-500 rounded-full transition-all duration-700 z-0"></div>
+
+                    <!-- Steps Container -->
+                    <div class="relative z-10 space-y-8" id="stepsContainer">
+                        <!-- Step 1 -->
+                        <div class="step-card group cursor-pointer p-5 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 transition-all" data-step="1" onclick="forceStep(1)">
+                            <div class="flex items-start gap-4">
+                                <div class="step-icon w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-lg shrink-0 border-2 border-slate-200 transition-colors duration-300">
+                                    1
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="text-lg font-bold text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors">理解概念</h4>
+                                    <p class="text-slate-600 text-sm leading-relaxed mb-2">
+                                        首先，我们要像侦探一样观察新知识。把复杂的文字变成脑海中的画面。在右侧，请将<span class="font-bold text-indigo-600">学习难度</span>和<span class="font-bold text-indigo-600">专注度</span>调整好，准备接收知识的“种子”。
+                                    </p>
+                                    <div class="hidden step-feedback text-xs font-bold text-emerald-600 mt-2 flex items-center gap-1">
+                                        <i class="fa-solid fa-check-circle"></i> 准备就绪！
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 2 -->
+                        <div class="step-card group cursor-pointer p-5 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 transition-all opacity-60" data-step="2" onclick="forceStep(2)">
+                            <div class="flex items-start gap-4">
+                                <div class="step-icon w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-lg shrink-0 border-2 border-slate-200 transition-colors duration-300">
+                                    2
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="text-lg font-bold text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors">练习应用</h4>
+                                    <p class="text-slate-600 text-sm leading-relaxed mb-2">
+                                        知识光看不练可不行！点击右侧的<span class="font-bold text-emerald-600">“开始学习”</span>按钮。观察能量的流动：你的专注度越高，能量积累越快。这就像大脑在建立新的神经连接！
+                                    </p>
+                                    <div class="hidden step-feedback text-xs font-bold text-emerald-600 mt-2 flex items-center gap-1">
+                                        <i class="fa-solid fa-check-circle"></i> 能量积累中...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Step 3 -->
+                        <div class="step-card group cursor-pointer p-5 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 transition-all opacity-60" data-step="3" onclick="forceStep(3)">
+                            <div class="flex items-start gap-4">
+                                <div class="step-icon w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-black text-lg shrink-0 border-2 border-slate-200 transition-colors duration-300">
+                                    3
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="text-lg font-bold text-slate-800 mb-1 group-hover:text-indigo-600 transition-colors">检查掌握程度</h4>
+                                    <p class="text-slate-600 text-sm leading-relaxed mb-2">
+                                        学习的最后一步是反思。看看右侧屏幕上的<span class="font-bold text-amber-500">“掌握指数”</span>。如果指数达到了100%，说明你已经完全掌握了！如果还没满，可以调整参数重新练习。
+                                    </p>
+                                    <div class="hidden step-feedback text-xs font-bold text-emerald-600 mt-2 flex items-center gap-1">
+                                        <i class="fa-solid fa-trophy"></i> 太棒了！学习完成！
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Status Footer -->
+                <div class="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-500">
+                    当前状态：<span id="systemStatus" class="font-bold text-indigo-600">等待初始化...</span>
+                </div>
+            </div>
+
+            <!-- RIGHT PANEL: Interactive Simulation -->
+            <div class="flex flex-col gap-6">
+                
+                <!-- Visualization Area -->
+                <div class="bg-white rounded-3xl shadow-xl border border-slate-100 p-1">
+                    <div class="canvas-container relative w-full aspect-[4/3]">
+                        <canvas id="simCanvas" class="w-full h-full block"></canvas>
+                        
+                        <!-- Overlay UI Elements inside Canvas area -->
+                        <div class="absolute top-4 left-4 bg-black/40 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs font-mono border border-white/10">
+                            <div class="flex items-center gap-2">
+                                <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                                LIVE DATA STREAM
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Feedback Toast -->
+                        <div id="simFeedback" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-md px-6 py-3 rounded-xl shadow-2xl border border-emerald-200 text-emerald-700 font-bold text-lg opacity-0 transition-opacity duration-500 pointer-events-none flex items-center gap-2 z-20">
+                            <i class="fa-solid fa-bolt text-yellow-500"></i>
+                            <span id="simFeedbackText">状态更新</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls Panel -->
+                <div class="bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-bold text-slate-800">模拟控制台</h3>
+                        <div class="flex gap-2">
+                             <span class="px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                物理引擎: ON
+                             </span>
+                        </div>
+                    </div>
+
+                    <!-- Sliders -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                        <!-- Parameter 1: Focus -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between text-sm font-medium">
+                                <label class="text-slate-700"><i class="fa-solid fa-eye text-indigo-500 mr-1"></i> 专注度 (Focus)</label>
+                                <span id="focusValue" class="text-indigo-600 font-mono">50%</span>
+                            </div>
+                            <input type="range" id="focusSlider" min="10" max="100" value="50" class="control-knob">
+                            <p class="text-xs text-slate-400">影响能量粒子产生的速度</p>
+                        </div>
+
+                        <!-- Parameter 2: Difficulty -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between text-sm font-medium">
+                                <label class="text-slate-700"><i class="fa-solid fa-layer-group text-rose-500 mr-1"></i> 学习难度 (Difficulty)</label>
+                                <span id="diffValue" class="text-rose-600 font-mono">中等</span>
+                            </div>
+                            <input type="range" id="diffSlider" min="1" max="3" step="1" value="2" class="control-knob" style="background: linear-gradient(to right, #4ade80 0%, #facc15 50%, #f87171 100%);">
+                            <p class="text-xs text-slate-400">简单 / 中等 / 困难 (影响粒子逃逸率)</p>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="grid grid-cols-3 gap-4">
+                        <button id="btnStart" class="col-span-1 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-play"></i> <span>开始学习</span>
+                        </button>
+                        
+                        <button id="btnPause" class="col-span-1 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold shadow-lg shadow-amber-200 transition-all active:scale-95 flex items-center justify-center gap-2 opacity-50 cursor-not-allowed" disabled>
+                            <i class="fa-solid fa-pause"></i> <span>暂停</span>
+                        </button>
+
+                        <button id="btnReset" class="col-span-1 py-3 px-4 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold transition-all active:scale-95 flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-rotate-right"></i> <span>重置</span>
+                        </button>
+                    </div>
+
+                    <!-- Real-time Stats -->
+                    <div class="mt-6 grid grid-cols-3 gap-2 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                        <div class="text-center">
+                            <div class="text-xs text-slate-400 mb-1">能量值 (Energy)</div>
+                            <div id="statEnergy" class="text-lg font-black text-indigo-600 font-mono">0</div>
+                        </div>
+                        <div class="text-center border-l border-slate-200">
+                            <div class="text-xs text-slate-400 mb-1">粒子数 (Particles)</div>
+                            <div id="statParticles" class="text-lg font-black text-emerald-600 font-mono">0</div>
+                        </div>
+                        <div class="text-center border-l border-slate-200">
+                            <div class="text-xs text-slate-400 mb-1">掌握度 (Mastery)</div>
+                            <div id="statMastery" class="text-lg font-black text-rose-600 font-mono">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Application Logic -->
+    <script>
+        // --- Configuration & State ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Simulation State
+        const state = {
+            currentStep: 1, // 1: Understand, 2: Practice, 3: Check
+            isRunning: false,
+            isPaused: false,
+            focus: 50, // 10 to 100
+            difficulty: 2, // 1: Easy, 2: Medium, 3: Hard
+            energy: 0,
+            particles: [],
+            mastery: 0,
+            maxEnergy: 5000,
+            frameCount: 0
+        };
+
+        // Physics Constants
+        const GRAVITY = 0.15;
+        const BOUNCE_DAMPING = 0.7;
+        
+        // DOM Elements
+        const els = {
+            steps: document.querySelectorAll('.step-card'),
+            lineProgress: document.getElementById('lineProgress'),
+            systemStatus: document.getElementById('systemStatus'),
+            focusSlider: document.getElementById('focusSlider'),
+            focusValue: document.getElementById('focusValue'),
+            diffSlider: document.getElementById('diffSlider'),
+            diffValue: document.getElementById('diffValue'),
+            btnStart: document.getElementById('btnStart'),
+            btnPause: document.getElementById('btnPause'),
+            btnReset: document.getElementById('btnReset'),
+            statEnergy: document.getElementById('statEnergy'),
+            statParticles: document.getElementById('statParticles'),
+            statMastery: document.getElementById('statMastery'),
+            simFeedback: document.getElementById('simFeedback'),
+            simFeedbackText: document.getElementById('simFeedbackText')
+        };
+
+        // --- Canvas Resizing ---
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- Particle System (Visualizing Knowledge) ---
+        class Particle {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * (state.focus / 10); // Focus affects spread
+                this.vy = (Math.random() - 0.5) * (state.focus / 10);
+                this.radius = Math.random() * 3 + 2;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.005 + 0.002;
+                this.color = type === 'knowledge' ? '#3b82f6' : '#f59e0b';
+                this.type = type;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                
+                // Gravity effect
+                if (this.type === 'knowledge') {
+                    this.vy += 0.05; 
+                }
+
+                // Difficulty affects lifespan (Harder = shorter life = harder to catch)
+                let diffMultiplier = state.difficulty === 1 ? 0.5 : (state.difficulty === 2 ? 1.0 : 2.0);
+                this.life -= this.decay * diffMultiplier;
+
+                // Boundary bounce
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                
+                // Glow
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        // --- Core Simulation Loop ---
+        function animate() {
+            if (!state.isPaused) {
+                // Clear Canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw Background Grid (Tech feel)
+                drawGrid();
+
+                // Draw "Brain" or "Container" based on Step
+                drawContainer();
+
+                // Logic based on Step
+                if (state.isRunning) {
+                    state.frameCount++;
+                    
+                    // Generate particles based on Focus
+                    if (state.frameCount % Math.max(1, Math.floor(20 - (state.focus / 10))) === 0) {
+                        state.particles.push(new Particle(canvas.width/2, 50, 'knowledge'));
+                    }
+
+                    // Update and Draw Particles
+                    for (let i = state.particles.length - 1; i >= 0; i--) {
+                        let p = state.particles[i];
+                        p.update();
+                        p.draw(ctx);
+
+                        // Collision with "Container" (Center of screen)
+                        let dx = p.x - (canvas.width / 2);
+                        let dy = p.y - (canvas.height / 2);
+                        let dist = Math.sqrt(dx*dx + dy*dy);
+                        
+                        // Absorb particles if they hit the "brain"
+                        if (dist < 60 && p.life > 0) {
+                            state.energy += 10;
+                            state.particles.splice(i, 1);
+                            
+                            // Visual feedback for absorption
+                            ctx.beginPath();
+                            ctx.arc(p.x, p.y, 20, 0, Math.PI*2);
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                            ctx.fill();
+                        } else if (p.life <= 0) {
+                            state.particles.splice(i, 1);
+                        }
+                    }
+
+                    // Update Stats
+                    updateStats();
+                    
+                    // Check Step Progression
+                    checkProgression();
+                } else {
+                    // Still draw existing particles if paused or not started, just don't update logic
+                     state.particles.forEach(p => p.draw(ctx));
+                }
+            }
+            
+            requestAnimationFrame(animate);
+        }
+
+        function drawGrid() {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.lineWidth = 1;
+            const gridSize = 40;
+            
+            for(let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for(let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+        }
+
+        function drawContainer() {
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const radius = 60;
+
+            // Pulse effect
+            const pulse = Math.sin(Date.now() / 500) * 5;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + pulse, 0, Math.PI * 2);
+            ctx.strokeStyle = state.currentStep === 1 ? '#3b82f6' : (state.currentStep === 2 ? '#10b981' : '#f59e0b');
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Inner text
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 16px "Noto Sans SC"';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            let label = "知识库";
+            if (state.currentStep === 1) label = "准备中...";
+            if (state.currentStep === 2) label = "吸收中!";
+            if (state.currentStep === 3) label = "已掌握!";
+            
+            ctx.fillText(label, cx, cy);
+            
+            // Progress Ring
+            if (state.energy > 0) {
+                const progress = Math.min(state.energy / state.maxEnergy, 1);
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius + 10, -Math.PI/2, (-Math.PI/2) + (Math.PI * 2 * progress));
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 6;
+                ctx.stroke();
+            }
+        }
+
+        function updateStats() {
+            els.statEnergy.innerText = Math.floor(state.energy);
+            els.statParticles.innerText = state.particles.length;
+            
+            let masteryPct = Math.min(100, Math.floor((state.energy / state.maxEnergy) * 100));
+            els.statMastery.innerText = masteryPct + "%";
+            state.mastery = masteryPct;
+
+            // Update Left Panel Line Progress
+            const totalSteps = 3;
+            const progressHeight = ((state.currentStep - 1) / (totalSteps - 1)) * 100;
+            els.lineProgress.style.height = `${Math.max(5, progressHeight)}%`;
+        }
+
+        function checkProgression() {
+            // Step 1 -> 2: Auto transition when Start is clicked (handled in button)
+            // Step 2 -> 3: Auto transition when Mastery > 80%
+            
+            if (state.currentStep === 2 && state.mastery >= 80) {
+                advanceStep(3);
+            }
+        }
+
+        // --- UI & Interaction Logic ---
+
+        function updateStepVisuals() {
+            els.steps.forEach((stepEl, index) => {
+                const stepNum = index + 1;
+                const icon = stepEl.querySelector('.step-icon');
+                const feedback = stepEl.querySelector('.step-feedback');
+
+                // Reset classes
+                stepEl.classList.remove('step-active', 'step-completed', 'opacity-60');
+                icon.classList.remove('bg-emerald-500', 'text-white', 'bg-blue-500', 'border-transparent');
+                icon.innerHTML = stepNum;
+                feedback.classList.add('hidden');
+
+                if (stepNum < state.currentStep) {
+                    // Completed
+                    stepEl.classList.add('step-completed');
+                    icon.classList.add('bg-blue-500', 'text-white', 'border-transparent');
+                    icon.innerHTML = '<i class="fa-solid fa-check"></i>';
+                } else if (stepNum === state.currentStep) {
+                    // Active
+                    stepEl.classList.add('step-active');
+                    icon.classList.add('bg-emerald-500', 'text-white', 'border-transparent');
+                    // Feedback based on step
+                    if (stepNum === 1) feedback.innerHTML = '<i class="fa-solid fa-compass"></i> 请调节右侧参数';
+                    if (stepNum === 2) feedback.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在努力吸收...';
+                    if (stepNum === 3) feedback.innerHTML = '<i class="fa-solid fa-trophy"></i> 学习完成！';
+                    feedback.classList.remove('hidden');
+                } else {
+                    // Future
+                    stepEl.classList.add('opacity-60');
+                }
+            });
+
+            // Update Status Text
+            const statusMap = {
+                1: "步骤 1：理解概念 - 请设置参数",
+                2: "步骤 2：练习应用 - 观察能量变化",
+                3: "步骤 3：检查掌握 - 查看最终结果"
+            };
+            els.systemStatus.innerText = statusMap[state.currentStep];
+        }
+
+        function showFeedback(text) {
+            els.simFeedbackText.innerText = text;
+            els.simFeedback.style.opacity = '1';
+            els.simFeedback.style.transform = 'translate(-50%, -60%)'; // float up slightly
+            
+            setTimeout(() => {
+                els.simFeedback.style.opacity = '0';
+                els.simFeedback.style.transform = 'translate(-50%, -50%)';
+            }, 2000);
+        }
+
+        function advanceStep(newStep) {
+            if (newStep > state.currentStep) {
+                state.currentStep = newStep;
+                updateStepVisuals();
+                
+                if (newStep === 2) showFeedback("开始吸收知识！");
+                if (newStep === 3) showFeedback("掌握度达标！优秀！");
+            }
+        }
+
+        // Allow clicking steps to force state (Educational rewind/fast-forward)
+        window.forceStep = function(step) {
+            // Only allow jumping to completed steps or current active context if paused
+            if (!state.isRunning) {
+                state.currentStep = step;
+                updateStepVisuals();
+                // Reset simulation data if going back to step 1
+                if (step === 1) {
+                    state.energy = 0;
+                    state.particles = [];
+                    state.mastery = 0;
+                    updateStats();
+                }
+            }
+        };
+
+        // --- Event Listeners ---
+
+        // Sliders
+        els.focusSlider.addEventListener('input', (e) => {
+            state.focus = parseInt(e.target.value);
+            els.focusValue.innerText = state.focus + "%";
+            
+            // If user interacts with slider in Step 1, we consider setup done
+            if (state.currentStep === 1) {
+                // Optional: auto-advance or just highlight. Let's keep it manual or auto on Start.
+            }
+        });
+
+        els.diffSlider.addEventListener('input', (e) => {
+            state.difficulty = parseInt(e.target.value);
+            const labels = {1: "简单", 2: "中等", 3: "困难"};
+            const colors = {1: "text-green-600", 2: "text-yellow-600", 3: "text-red-600"};
+            
+            els.diffValue.innerText = labels[state.difficulty];
+            els.diffValue.className = `font-mono font-bold ${colors[state.difficulty]}`;
+        });
+
+        // Buttons
+        els.btnStart.addEventListener('click', () => {
+            if (state.currentStep === 1) {
+                advanceStep(2);
+            }
+            
+            state.isRunning = true;
+            state.isPaused = false;
+            
+            els.btnStart.disabled = true;
+            els.btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+            els.btnStart.innerHTML = '<i class="fa-solid fa-play"></i> <span>进行中</span>';
+            
+            els.btnPause.disabled = false;
+            els.btnPause.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            showFeedback("模拟开始！");
+        });
+
+        els.btnPause.addEventListener('click', () => {
+            state.isPaused = !state.isPaused;
+            
+            if (state.isPaused) {
+                els.btnPause.innerHTML = '<i class="fa-solid fa-play"></i> <span>继续</span>';
+                els.btnPause.classList.replace('bg-amber-500', 'bg-emerald-500');
+                els.systemStatus.innerText = "模拟已暂停";
+            } else {
+                els.btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> <span>暂停</span>';
+                els.btnPause.classList.replace('bg-emerald-500', 'bg-amber-500');
+                els.systemStatus.innerText = "模拟运行中...";
+            }
+        });
+
+        els.btnReset.addEventListener('click', () => {
+            state.isRunning = false;
+            state.isPaused = false;
+            state.energy = 0;
+            state.particles = [];
+            state.mastery = 0;
+            state.currentStep = 1;
+            state.frameCount = 0;
+            
+            // Reset UI
+            els.btnStart.disabled = false;
+            els.btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+            els.btnStart.innerHTML = '<i class="fa-solid fa-play"></i> <span>开始学习</span>';
+            
+            els.btnPause.disabled = true;
+            els.btnPause.classList.add('opacity-50', 'cursor-not-allowed');
+            els.btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> <span>暂停</span>';
+            
+            updateStats();
+            updateStepVisuals();
+            showFeedback("重置完成");
+            
+            // Clear canvas immediately
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+            drawContainer();
+        });
+
+        // --- Initialization ---
+        updateStepVisuals();
+        updateStats();
+        requestAnimationFrame(animate);
+
+    </script>
+</body>
+</html>

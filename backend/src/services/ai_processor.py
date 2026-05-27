@@ -5,6 +5,7 @@ import io
 import time
 import logging
 import asyncio
+import httpx
 from typing import Dict, List, Optional, Tuple, Any
 from PIL import Image
 import PyPDF2
@@ -15,6 +16,172 @@ import re
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+def _compact_pdf_text(text: str) -> str:
+    """Normalize extracted PDF text while preserving readable boundaries."""
+    text = re.sub(r"[ \t]+", " ", text or "")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _append_pdf_context_to_prompt(prompt: str, user_preferences: Optional[Dict], *, language: str = "zh") -> str:
+    """Add extracted PDF text and learner goals to an analysis prompt."""
+    user_preferences = user_preferences or {}
+    pdf_context = user_preferences.get("_pdf_text_context") or {}
+    excerpt = pdf_context.get("excerpt")
+    description = user_preferences.get("description") or user_preferences.get("user_instruction")
+
+    additions = []
+    if description:
+        additions.append(
+            "User learning goals / 用户学习目标:\n"
+            f"{description}"
+        )
+
+    if excerpt:
+        if language == "en":
+            additions.append(
+                "Extracted PDF text context. Treat this text as the primary source of truth. "
+                "If it differs from page images, prioritize the extracted text.\n"
+                f"Text source: {pdf_context.get('source', 'unknown')}; "
+                f"pages with text: {pdf_context.get('pages_with_text', 0)}; "
+                f"total text chars: {pdf_context.get('total_chars', 0)}.\n\n"
+                f"{excerpt}"
+            )
+        else:
+            additions.append(
+                "PDF抽取文本上下文。请把这段文本作为主要依据；如果它与页面图片判断冲突，优先依据文本。"
+                "如果原文是英文，输出仍使用简体中文，并保留必要英文术语及中文译名。\n"
+                f"文本来源: {pdf_context.get('source', 'unknown')}; "
+                f"有文本页数: {pdf_context.get('pages_with_text', 0)}; "
+                f"文本总字符数: {pdf_context.get('total_chars', 0)}.\n\n"
+                f"{excerpt}"
+            )
+
+    if not additions:
+        return prompt
+
+    return prompt.rstrip() + "\n\n" + "\n\n".join(additions)
+
+
+def _extract_json_from_text(response_text: str) -> Optional[Dict]:
+    """Extract the outermost JSON object from model text."""
+    if not response_text:
+        return None
+
+    cleaned = response_text.replace("```json", "").replace("```html", "").replace("```", "")
+    json_start = cleaned.find("{")
+    json_end = cleaned.rfind("}") + 1
+    if json_start == -1 or json_end <= json_start:
+        return None
+
+    try:
+        return json.loads(cleaned[json_start:json_end])
+    except json.JSONDecodeError:
+        return None
+
+
+def _build_text_aware_fallback_analysis(user_preferences: Optional[Dict], *, language: str = "zh") -> Dict:
+    """Create a useful fallback analysis from extracted text instead of a generic shell."""
+    user_preferences = user_preferences or {}
+    pdf_context = user_preferences.get("_pdf_text_context") or {}
+    text = (pdf_context.get("excerpt") or "").lower()
+
+    term_map = [
+        ("vector calculus", "向量微积分", "Vector Calculus"),
+        ("difference quotient", "差商", "Difference Quotient"),
+        ("derivative", "导数", "Derivative"),
+        ("partial derivative", "偏导数", "Partial Derivative"),
+        ("gradient", "梯度", "Gradient"),
+        ("chain rule", "链式法则", "Chain Rule"),
+        ("taylor", "泰勒展开", "Taylor Series"),
+        ("jacobian", "雅可比矩阵", "Jacobian"),
+        ("hessian", "海森矩阵", "Hessian"),
+        ("optimization", "优化", "Optimization"),
+    ]
+    matched = []
+    for needle, zh, en in term_map:
+        if needle in text and zh not in matched:
+            matched.append(zh if language != "en" else en)
+
+    if matched:
+        key_concepts = matched[:8]
+        return {
+            "main_topics": ["向量微积分", "机器学习中的函数变化与优化"] if language != "en" else ["Vector Calculus", "Function Change and Optimization in Machine Learning"],
+            "key_concepts": key_concepts,
+            "learning_objectives": [
+                "用图像和变化率直觉理解导数",
+                "理解偏导数如何描述多变量函数的单方向变化",
+                "理解梯度为什么指向函数增长最快的方向",
+                "理解链式法则与神经网络反向传播的联系",
+            ] if language != "en" else [
+                "Understand derivatives through rates of change and graphs",
+                "Explain partial derivatives as one-direction changes in multivariable functions",
+                "Understand why the gradient points toward steepest ascent",
+                "Connect the chain rule to neural-network backpropagation",
+            ],
+            "prerequisite_knowledge": ["函数", "坐标系", "斜率", "基础代数"] if language != "en" else ["Functions", "Coordinate systems", "Slope", "Basic algebra"],
+            "difficulty_level": "中级" if language != "en" else "intermediate",
+            "target_grade_level": user_preferences.get("grade_level", 6),
+            "content_structure": [
+                {"title": "函数与变化率", "page_start": 1, "page_end": 5, "topics": ["函数", "差商", "导数"]},
+                {"title": "多变量变化", "page_start": 6, "page_end": 15, "topics": ["偏导数", "梯度", "雅可比矩阵"]},
+                {"title": "近似与优化", "page_start": 16, "page_end": 33, "topics": ["链式法则", "泰勒展开", "机器学习优化"]},
+            ],
+            "visual_elements": ["函数曲线", "切线斜率", "等高线", "梯度箭头"],
+            "subject_area": "数学",
+            "procedural_concepts": [
+                {
+                    "name": "从差商到导数",
+                    "description": "用两点平均斜率逐渐逼近一点处的瞬时变化率。",
+                    "key_steps": ["选择函数图像上的两个点", "计算差商作为平均变化率", "缩小间距并观察切线斜率"],
+                    "complexity": "中等"
+                },
+                {
+                    "name": "从偏导数组装梯度",
+                    "description": "分别观察多变量函数在各坐标方向上的变化，再合成为梯度向量。",
+                    "key_steps": ["固定其他变量", "计算每个方向的偏导数", "把偏导数组成梯度并解释方向"],
+                    "complexity": "中等"
+                },
+                {
+                    "name": "用链式法则理解反向传播",
+                    "description": "把复合函数拆成层层依赖，沿依赖关系传递局部变化率。",
+                    "key_steps": ["拆分复合函数结构", "计算每层局部导数", "相乘得到整体影响并连接梯度下降"],
+                    "complexity": "复杂"
+                }
+            ],
+            "analysis_diagnostics": {
+                "fallback_used": True,
+                "fallback_reason": "ai_content_analysis_failed_text_heuristic",
+                "pdf_text_chars": pdf_context.get("total_chars", 0),
+            }
+        }
+
+    return {
+        "main_topics": ["PDF学习内容"] if language != "en" else ["PDF Learning Content"],
+        "key_concepts": ["核心概念", "重点关系", "应用场景"] if language != "en" else ["Core concepts", "Key relationships", "Applications"],
+        "learning_objectives": ["理解PDF中的核心概念", "把概念应用到例题或情境中"] if language != "en" else ["Understand the core concepts", "Apply them to examples or scenarios"],
+        "prerequisite_knowledge": [],
+        "difficulty_level": "中级" if language != "en" else "intermediate",
+        "target_grade_level": user_preferences.get("grade_level", 6),
+        "content_structure": [],
+        "visual_elements": [],
+        "subject_area": "综合教育" if language != "en" else "General Education",
+        "procedural_concepts": [
+            {
+                "name": "提取核心概念" if language != "en" else "Extract Core Concepts",
+                "description": "从材料中找出最关键的概念和它们之间的关系。" if language != "en" else "Identify the most important concepts and relationships.",
+                "key_steps": ["定位主题", "解释概念", "应用练习"] if language != "en" else ["Find topics", "Explain concepts", "Practice application"],
+                "complexity": "中等" if language != "en" else "intermediate"
+            }
+        ],
+        "analysis_diagnostics": {
+            "fallback_used": True,
+            "fallback_reason": "ai_content_analysis_failed_generic",
+            "pdf_text_chars": pdf_context.get("total_chars", 0),
+        }
+    }
 
 
 # ============================================================================
@@ -72,6 +239,13 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
     logger.warning("Anthropic SDK not available. Install with: pip install anthropic")
+
+try:
+    from openai import OpenAI as OpenAIClient
+    OPENAI_SDK_AVAILABLE = True
+except ImportError:
+    OPENAI_SDK_AVAILABLE = False
+    logger.warning("OpenAI SDK not available. Install with: pip install openai")
 
 
 class AIProvider(ABC):
@@ -134,15 +308,16 @@ class EnglishProvider(AIProvider):
             # Try multiple environment variables for flexibility
             api_key = (os.getenv("ENGLISH_API_KEY") or
                       os.getenv("MIDDLE_TRANSFER_API_KEY") or
+                      os.getenv("TRANSFER_API_KEY") or
                       os.getenv("GEMINI_API_KEY") or
                       os.getenv("OPENAI_API_KEY"))
 
         if not api_key:
-            raise ValueError("API key not provided. Set ENGLISH_API_KEY, MIDDLE_TRANSFER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY environment variable or pass api_key parameter.")
+            raise ValueError("API key not provided. Set ENGLISH_API_KEY, MIDDLE_TRANSFER_API_KEY, TRANSFER_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY environment variable or pass api_key parameter.")
 
         self.api_key = api_key
         self.model = model
-        self.base_url = "https://chatapi.onechats.ai/v1beta"
+        self.base_url = "https://api.siliconflow.cn/v1beta"
 
         # Validate model choice
         supported_models = [
@@ -170,7 +345,11 @@ class EnglishProvider(AIProvider):
         content = []
 
         # Add the text prompt
-        prompt = self._get_content_analysis_prompt(grade_level, interests)
+        prompt = _append_pdf_context_to_prompt(
+            self._get_content_analysis_prompt(grade_level, interests),
+            user_preferences,
+            language="en"
+        )
         content.append({"type": "text", "text": prompt})
 
         # Add images (limit to first 10 for token management)
@@ -179,7 +358,7 @@ class EnglishProvider(AIProvider):
             content.append({
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/jpeg;base64,{images[i]['image_data']}",
+                    "url": f"data:image/png;base64,{images[i]['image_data']}",
                     "detail": "low"
                 }
             })
@@ -193,7 +372,7 @@ class EnglishProvider(AIProvider):
             logger.info(f"🌐 AI API call completed in {api_time:.2f}s")
 
             parse_start = time.time()
-            result = self._extract_json_from_response(response)
+            result = self._extract_json_from_response(response, user_preferences)
             parse_time = time.time() - parse_start
             logger.info(f"📄 Response parsed in {parse_time:.2f}s")
 
@@ -202,7 +381,16 @@ class EnglishProvider(AIProvider):
             return result
         except Exception as e:
             logger.error(f"❌ Error analyzing content with English Provider ({self.model}): {e}")
-            return self._generate_fallback_analysis()
+            if user_preferences.get("_pdf_text_context", {}).get("excerpt"):
+                try:
+                    text_only_response = await self._make_api_call([{"type": "text", "text": prompt}])
+                    parsed = _extract_json_from_text(text_only_response)
+                    if parsed:
+                        logger.info("✅ English content analysis recovered using extracted PDF text")
+                        return parsed
+                except Exception as text_error:
+                    logger.error(f"❌ Text-only English content analysis failed: {text_error}")
+            return self._generate_fallback_analysis(user_preferences)
 
     async def generate_website(self, images: List[Dict], analysis: Dict, user_preferences: Dict) -> Dict:
         """Generate website using unified English API."""
@@ -227,7 +415,7 @@ class EnglishProvider(AIProvider):
             content.append({
                 "type": "image_url",
                 "image_url": {
-                    "url": f"data:image/jpeg;base64,{images[i]['image_data']}",
+                    "url": f"data:image/png;base64,{images[i]['image_data']}",
                     "detail": "low"
                 }
             })
@@ -336,25 +524,17 @@ class EnglishProvider(AIProvider):
                 else:
                     raise ValueError("Invalid OpenAI response format")
 
-    def _extract_json_from_response(self, response_text: str) -> Dict:
+    def _extract_json_from_response(self, response_text: str, user_preferences: Optional[Dict] = None) -> Dict:
         """Extract JSON from API response text."""
         if not response_text:
-            return self._generate_fallback_analysis()
+            return self._generate_fallback_analysis(user_preferences)
 
-        # Try to extract JSON from response
-        json_start = response_text.find('{')
-        json_end = response_text.rfind('}') + 1
-
-        if json_start != -1 and json_end > json_start:
-            json_str = response_text[json_start:json_end]
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                print(f"Failed to parse JSON from response, using fallback")
-                return self._generate_fallback_analysis()
+        parsed = _extract_json_from_text(response_text)
+        if parsed:
+            return parsed
 
         # If no JSON found, return fallback
-        return self._generate_fallback_analysis()
+        return self._generate_fallback_analysis(user_preferences)
 
     def _get_content_analysis_prompt(self, grade_level: str, interests: List[str]) -> str:
         """Get the content analysis prompt for English providers."""
@@ -368,8 +548,10 @@ class EnglishProvider(AIProvider):
         """Get the website generation prompt for English providers."""
         return ai_prompts.english_website_generation_prompt(grade_level, interests, analysis)
 
-    def _generate_fallback_analysis(self) -> Dict:
+    def _generate_fallback_analysis(self, user_preferences: Optional[Dict] = None) -> Dict:
         """Generate fallback analysis when API fails."""
+        if user_preferences and user_preferences.get("_pdf_text_context", {}).get("excerpt"):
+            return _build_text_aware_fallback_analysis(user_preferences, language="en")
         return {
             "main_topics": ["Educational Content"],
             "key_concepts": ["Learning", "Understanding"],
@@ -379,7 +561,11 @@ class EnglishProvider(AIProvider):
             "target_grade_level": 6,
             "content_structure": [],
             "visual_elements": [],
-            "subject_area": "General Education"
+            "subject_area": "General Education",
+            "analysis_diagnostics": {
+                "fallback_used": True,
+                "fallback_reason": "ai_content_analysis_failed_generic"
+            }
         }
 
     def _generate_fallback_website(self, pdf_images: List[Dict], analysis: Dict, user_preferences: Optional[Dict] = None) -> Dict:
@@ -428,7 +614,7 @@ class EnglishProvider(AIProvider):
                             <div class="page-section" id="page-{page['page']}">
                                 <h3 class="text-xl font-semibold mb-4">Page {page['page']}</h3>
                                 <div class="bg-gray-50 rounded-lg p-4">
-                                    <img src="data:image/jpeg;base64,{page['image_data']}"
+                                    <img src="data:image/png;base64,{page['image_data']}"
                                          alt="Page {page['page']}"
                                          class="w-full max-w-4xl mx-auto shadow-md rounded">
                                 </div>
@@ -472,12 +658,197 @@ class EnglishProvider(AIProvider):
         }
 
 
+class GeminiClient:
+    """Thin wrapper around Google Gemini API that mimics OpenAI client interface."""
+
+    def __init__(self, api_key: str, base_url: str = "https://generativelanguage.googleapis.com/v1beta"):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.chat = self._Chat(self)
+
+    class _Chat:
+        def __init__(self, client: "GeminiClient"):
+            self._client = client
+            self.completions = self._Completions(client)
+
+        class _Completions:
+            def __init__(self, client: "GeminiClient"):
+                self._client = client
+
+            def create(self, **params) -> Any:
+                return _gemini_sync_call(self._client, **params)
+
+
+def _gemini_sync_call(client: GeminiClient, **params) -> Any:
+    """Make synchronous Gemini API call, returning OpenAI-compatible response object."""
+    model = params.get("model", "gemini-2.5-flash")
+    messages = params.get("messages", [])
+    max_tokens = params.get("max_tokens")
+    temperature = params.get("temperature")
+
+    # Convert OpenAI messages to Gemini contents format
+    contents = []
+    for msg in messages:
+        parts = []
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            parts.append({"text": content})
+        elif isinstance(content, list):
+            for item in content:
+                if item.get("type") == "text":
+                    parts.append({"text": item["text"]})
+                elif item.get("type") == "image_url":
+                    # Gemini expects inline_data for images
+                    url = item.get("image_url", {}).get("url", "")
+                    if url.startswith("data:"):
+                        mime, b64 = url.split(",", 1) if "," in url else ("image/png", url)
+                        mime = mime.replace("data:", "").split(";")[0]
+                        parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+        role = "user" if msg.get("role") != "assistant" else "model"
+        contents.append({"role": role, "parts": parts})
+
+    # Build request
+    url = f"{client.base_url}/models/{model}:generateContent?key={client.api_key}"
+    body = {"contents": contents}
+    if max_tokens:
+        body.setdefault("generationConfig", {})["maxOutputTokens"] = max_tokens
+    if temperature is not None:
+        body.setdefault("generationConfig", {})["temperature"] = temperature
+
+    # Make request
+    response = httpx.post(url, json=body, timeout=900.0)
+    response.raise_for_status()
+    data = response.json()
+
+    # Convert Gemini response to OpenAI-compatible format
+    candidates = data.get("candidates", [])
+    text = ""
+    if candidates and candidates[0].get("content", {}).get("parts"):
+        text = candidates[0]["content"]["parts"][0].get("text", "")
+
+    return _GeminiResponse(text=text, model=model)
+
+
+class _GeminiResponse:
+    """Mimics OpenAI response object."""
+
+    def __init__(self, text: str, model: str = ""):
+        self.choices = [_GeminiChoice(text)]
+        self.model = model
+
+
+class _GeminiChoice:
+    def __init__(self, text: str):
+        self.message = _GeminiMessage(text)
+        self.finish_reason = "stop"
+
+
+class _GeminiMessage:
+    def __init__(self, content: str):
+        self.content = content
+
+
 class ChineseProvider(AIProvider):
-    """Unified Chinese AI provider supporting both Anthropic and Zhipu models."""
+    """Unified Chinese AI provider supporting Anthropic, Zhipu, and OpenAI-compatible models."""
 
     # Model detection
-    ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"]
-    ZHIPU_MODELS = ["glm-4.7", "glm-4.6", "glm-4.6v"]
+    ANTHROPIC_MODELS = []  # Claude now goes through uuapi (openai_compat), not Anthropic SDK
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6v"]
+    OPENAI_COMPAT_MODELS = [
+        # Claude (via uuapi)
+        "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+        # OpenAI GPT (via uuapi)
+        "gpt-5.4", "gpt-5.5",
+        # DeepSeek
+        "deepseek-v4-pro", "deepseek-v4-flash",
+        # Gemini (via uuapi)
+        "gemini-3.1-pro",
+        # Kimi (月之暗面)
+        "kimi-k2.6",
+        # GLM (via Zhipu OpenAI-compatible API)
+        "glm-4.7", "glm-4.6v",
+        # Others (via SiliconFlow)
+        "minimax-m2.5", "qwen3.6-35b-a3b",
+    ]
+
+    # Internal name → SiliconFlow API model ID mapping
+    SILICONFLOW_MODEL_MAP = {
+        "minimax-m2.5": "MiniMaxAI/MiniMax-M2.5",
+        "qwen3.6-35b-a3b": "Qwen/Qwen3.6-35B-A3B",
+    }
+
+    # Model categories for routing to different API proxies
+    CLAUDE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
+    GPT_MODELS = ["gpt-5.4", "gpt-5.5"]
+    GEMINI_MODELS = ["gemini-3.1-pro"]
+    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"]
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6v"]
+    KIMI_MODELS = ["kimi-k2.6"]
+
+    def _resolve_model(self, model: str) -> str:
+        """Resolve internal model name to actual API model ID."""
+        if self.backend == "openai_compat":
+            # GLM pass through (Zhipu OpenAI-compatible API handles it)
+            if model in self.ZHIPU_MODELS:
+                return model
+            # DeepSeek model ID mapping for official API
+            if model in self.DEEPSEEK_MODELS:
+                return self.DEEPSEEK_MODEL_MAP.get(model, model)
+            # Kimi pass through (Moonshot API handles it)
+            if model in self.KIMI_MODELS:
+                return model
+            # Claude pass through (uuapi handles it with same model names)
+            if model in self.CLAUDE_MODELS:
+                return model
+            # GPT pass through (uuapi handles it)
+            if model in self.GPT_MODELS:
+                return model
+            # Gemini → use appropriate model map based on provider type
+            if model in self.GEMINI_MODELS:
+                # Check if using uuapi (OpenAI-compatible) or Google SDK
+                if self.gemini_client is not None and not isinstance(self.gemini_client, GeminiClient):
+                    return self.GEMINI_UUAPI_MODEL_MAP.get(model, model)
+                return self.GEMINI_MODEL_MAP.get(model, model)
+            # Others → SiliconFlow mapping
+            return self.SILICONFLOW_MODEL_MAP.get(model, model)
+        return model
+
+    # Internal name → Google Gemini API model ID mapping
+    GEMINI_MODEL_MAP = {
+        "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3.5-flash": "gemini-3.5-flash",
+        "gemini-3-flash-preview": "gemini-3-flash-preview",
+        "gemini-2.5-pro": "gemini-2.5-pro",
+    }
+
+    # Internal name → uuapi Gemini model ID mapping
+    GEMINI_UUAPI_MODEL_MAP = {
+        "gemini-3.1-pro": "gemini-3.1-pro-high",
+    }
+
+    # Internal name → DeepSeek API model name mapping
+    DEEPSEEK_MODEL_MAP = {
+        "deepseek-v4-pro": "deepseek-reasoner",
+        "deepseek-v4-flash": "deepseek-chat",
+    }
+
+    def _get_client_for_model(self, model: str):
+        """Get the appropriate OpenAI client based on model category."""
+        if self.backend != "openai_compat":
+            return self.openai_client
+        if model in self.CLAUDE_MODELS and self.claude_client is not None:
+            return self.claude_client
+        if model in self.GPT_MODELS and self.gpt_client is not None:
+            return self.gpt_client
+        if model in self.GEMINI_MODELS and self.gemini_client is not None:
+            return self.gemini_client
+        if model in self.ZHIPU_MODELS and self.zhipu_oa_client is not None:
+            return self.zhipu_oa_client
+        if model in self.DEEPSEEK_MODELS and self.deepseek_client is not None:
+            return self.deepseek_client
+        if model in self.KIMI_MODELS and self.kimi_client is not None:
+            return self.kimi_client
+        return self.openai_client
 
     def __init__(
         self,
@@ -490,8 +861,8 @@ class ChineseProvider(AIProvider):
 
         Args:
             api_key: API key. If not provided, auto-detects from environment based on model.
-            model: Model to use. Determines which backend (Anthropic vs Zhipu) to use.
-            base_url: Optional base URL for Anthropic API (for proxy usage).
+            model: Model to use. Determines which backend (Anthropic, Zhipu, or openai_compat) to use.
+            base_url: Optional base URL for API proxy.
         """
         self.model = model
         self.backend = self._detect_backend(model)
@@ -499,12 +870,15 @@ class ChineseProvider(AIProvider):
         # Auto-detect API key based on backend
         if not api_key:
             if self.backend == "anthropic":
-                api_key = os.getenv("ANTHROPIC_API_KEY")
+                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+            elif self.backend == "openai_compat":
+                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
             else:
-                api_key = os.getenv("ZHIPU_API_KEY")
+                api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
 
         if not api_key:
-            env_var = "ANTHROPIC_API_KEY" if self.backend == "anthropic" else "ZHIPU_API_KEY"
+            env_var_map = {"anthropic": "TRANSFER_API_KEY", "openai_compat": "TRANSFER_API_KEY", "zhipu": "ZHIPU_API_KEY"}
+            env_var = env_var_map.get(self.backend, "TRANSFER_API_KEY")
             raise ValueError(f"API key not provided. Set {env_var} environment variable or pass api_key parameter.")
 
         # Initialize appropriate client
@@ -513,30 +887,125 @@ class ChineseProvider(AIProvider):
                 raise ImportError("Anthropic SDK not installed. Install with: pip install anthropic")
 
             client_kwargs = {"api_key": api_key}
+            # Derive Anthropic base URL from TRANSFER_BASE_URL (strip /v1 suffix)
             if base_url:
                 client_kwargs["base_url"] = base_url
-            elif os.getenv("ANTHROPIC_BASE_URL"):
-                client_kwargs["base_url"] = os.getenv("ANTHROPIC_BASE_URL")
+            else:
+                transfer_url = os.getenv("TRANSFER_BASE_URL", "")
+                if transfer_url:
+                    client_kwargs["base_url"] = transfer_url.replace("/v1", "")
+                elif os.getenv("ANTHROPIC_BASE_URL"):
+                    client_kwargs["base_url"] = os.getenv("ANTHROPIC_BASE_URL")
 
             self.anthropic_client = Anthropic(**client_kwargs)
             self.zhipu_client = None
+            self.openai_client = None
+            self.gpt_client = None
+            self.claude_client = None
+            self.zhipu_oa_client = None
+            self.deepseek_client = None
+            self.gemini_client = None
+            self.kimi_client = None
             self.text_model = model
             logger.info(f"🎨 ChineseProvider initialized with Anthropic backend, model: {self.model}")
+
+        elif self.backend == "openai_compat":
+            if not OPENAI_SDK_AVAILABLE:
+                raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
+
+            # Main client: SiliconFlow (for DeepSeek/GLM/Kimi/MiniMax/Qwen)
+            compat_base_url = base_url or os.getenv("TRANSFER_BASE_URL", "https://api.siliconflow.cn/v1")
+            self.openai_client = OpenAIClient(api_key=api_key, base_url=compat_base_url)
+            self.anthropic_client = None
+            self.zhipu_client = None
+            self.text_model = model
+            self.default_text_model = model
+
+            # GPT client: uuapi.net
+            gpt_key = os.getenv("GPT_API_KEY")
+            gpt_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
+            if gpt_key:
+                self.gpt_client = OpenAIClient(api_key=gpt_key, base_url=gpt_url)
+                logger.info(f"🎨 GPT client initialized via uuapi: {gpt_url}")
+            else:
+                self.gpt_client = None
+
+            # Claude client: uuapi.net
+            claude_key = os.getenv("ANTHROPIC_API_KEY")
+            claude_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
+            if claude_key:
+                self.claude_client = OpenAIClient(api_key=claude_key, base_url=claude_url)
+                logger.info(f"🎨 Claude client initialized via uuapi: {claude_url}")
+            else:
+                self.claude_client = None
+
+            # Gemini client: auto-detect uuapi (OpenAI-compatible) vs Google official API
+            gemini_key = os.getenv("GEMINI_API_KEY")
+            gemini_url = os.getenv("GEMINI_BASE_URL", "https://uuapi.net/v1")
+            if gemini_key:
+                if "uuapi.net" in gemini_url:
+                    # uuapi is OpenAI-compatible, use regular OpenAIClient
+                    self.gemini_client = OpenAIClient(api_key=gemini_key, base_url=gemini_url)
+                    logger.info(f"🎨 Gemini client initialized via uuapi (OpenAI-compat): {gemini_url}")
+                else:
+                    # Google official API, use GeminiClient adapter
+                    self.gemini_client = GeminiClient(api_key=gemini_key, base_url=gemini_url)
+                    logger.info(f"🎨 Gemini client initialized via Google API: {gemini_url}")
+            else:
+                self.gemini_client = None
+
+            # Zhipu client: open.bigmodel.cn (OpenAI-compatible)
+            zhipu_key = os.getenv("ZHIPU_API_KEY")
+            zhipu_url = "https://open.bigmodel.cn/api/paas/v4"
+            if zhipu_key:
+                self.zhipu_oa_client = OpenAIClient(api_key=zhipu_key, base_url=zhipu_url)
+                logger.info(f"🎨 Zhipu GLM client initialized via OpenAI-compat: {zhipu_url}")
+            else:
+                self.zhipu_oa_client = None
+
+            # DeepSeek client: api.deepseek.com
+            deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+            deepseek_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            if deepseek_key:
+                self.deepseek_client = OpenAIClient(api_key=deepseek_key, base_url=deepseek_url)
+                logger.info(f"🎨 DeepSeek client initialized via official API: {deepseek_url}")
+            else:
+                self.deepseek_client = None
+
+            # Kimi client: api.moonshot.cn
+            kimi_key = os.getenv("KIMI_API_KEY")
+            kimi_url = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
+            if kimi_key:
+                self.kimi_client = OpenAIClient(api_key=kimi_key, base_url=kimi_url)
+                logger.info(f"🎨 Kimi client initialized via moonshot: {kimi_url}")
+            else:
+                self.kimi_client = None
+
+            logger.info(f"🎨 ChineseProvider initialized with OpenAI-compat backend, model: {self.model}, base_url: {compat_base_url}")
+
         else:  # zhipu
             if not ZHIPU_AVAILABLE:
                 raise ImportError("Zhipu AI SDK not installed. Install with: pip install zai-sdk")
 
             self.zhipu_client = ZhipuAiClient(api_key=api_key)
             self.anthropic_client = None
-            self.default_text_model = os.getenv("ZHIPU_TEXT_MODEL", "glm-4.6")
+            self.openai_client = None
+            self.gpt_client = None
+            self.claude_client = None
+            self.zhipu_oa_client = None
+            self.deepseek_client = None
+            self.gemini_client = None
+            self.kimi_client = None
+            self.default_text_model = os.getenv("ZHIPU_TEXT_MODEL", "glm-4.7")
             self.text_model = self.default_text_model
             logger.info(f"🎨 ChineseProvider initialized with Zhipu backend, model: {self.model}")
 
     def _detect_backend(self, model: str) -> str:
         """Detect which backend to use based on model name."""
-        if model.startswith("claude-") or model in self.ANTHROPIC_MODELS:
-            return "anthropic"
-        return "zhipu"  # Default to Zhipu for Chinese provider
+        # Claude models now go through uuapi (openai_compat), not Anthropic SDK
+        if model in self.OPENAI_COMPAT_MODELS:
+            return "openai_compat"
+        return "zhipu"  # Default
 
     def _map_grade_level_to_string(self, grade_level: int) -> str:
         """Convert integer grade level to Chinese grade level string."""
@@ -562,12 +1031,18 @@ class ChineseProvider(AIProvider):
     async def _run_zhipu_call(self, model: str, messages: List[Dict], thinking_params: Optional[Dict] = None, max_tokens: Optional[int] = None) -> Any:
         """Run synchronous Zhipu API call in a thread pool to avoid blocking the event loop.
 
+        Also transparently redirects to OpenAI-compat backend when applicable.
+
         Args:
             model: Model name to use
             messages: List of message dicts
             thinking_params: Optional thinking parameters
             max_tokens: Optional max tokens limit for response
         """
+        # Redirect to openai_compat if that's the active backend
+        if self.backend == "openai_compat" and self.openai_client is not None:
+            return await self._run_openai_compat_call(model, messages, max_tokens=max_tokens)
+
         if self.zhipu_client is None:
             raise RuntimeError("Zhipu client not initialized. This provider is configured for Anthropic.")
 
@@ -602,6 +1077,47 @@ class ChineseProvider(AIProvider):
                 )
         except Exception:
             # Never break generation due to diagnostic logging.
+            pass
+
+        return response
+
+    async def _run_openai_compat_call(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None) -> Any:
+        """Run OpenAI-compatible API call via appropriate transfer station.
+
+        Routes to: SiliconFlow (DeepSeek/GLM/Kimi/MiniMax/Qwen) or uuapi (GPT/Gemini).
+        Returns the same response format as _run_zhipu_call (choices[0].message.content).
+        """
+        if self.openai_client is None:
+            raise RuntimeError("OpenAI-compat client not initialized.")
+
+        # Resolve internal model name to API model ID
+        resolved_model = self._resolve_model(model)
+        # Route to correct client based on model category
+        client = self._get_client_for_model(model)
+
+        def _make_sync_call():
+            params = {
+                "model": resolved_model,
+                "messages": messages,
+            }
+            if max_tokens:
+                params["max_tokens"] = max_tokens
+
+            return client.chat.completions.create(**params)
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, _make_sync_call)
+
+        # Log truncation diagnostics
+        try:
+            if response and getattr(response, "choices", None):
+                finish_reason = getattr(response.choices[0], "finish_reason", None)
+                if finish_reason in ["length", "max_tokens"]:
+                    logger.warning(
+                        "⚠️ OpenAI-compat response may be truncated: finish_reason=%s, model=%s",
+                        finish_reason, model
+                    )
+        except Exception:
             pass
 
         return response
@@ -731,16 +1247,20 @@ class ChineseProvider(AIProvider):
 
         # Prepare images (limit to first 5 pages due to context limits)
         max_pages = min(len(images), 5)
+        prompt = _append_pdf_context_to_prompt(
+            self._get_content_analysis_prompt(grade_level, interests),
+            user_preferences,
+            language="zh"
+        )
 
         if self.backend == "anthropic":
-            return await self._analyze_content_anthropic(images, max_pages, grade_level, interests, analysis_start)
+            return await self._analyze_content_anthropic(images, max_pages, prompt, analysis_start, user_preferences)
         else:
-            return await self._analyze_content_zhipu(images, max_pages, grade_level, interests, analysis_start)
+            return await self._analyze_content_zhipu(images, max_pages, prompt, analysis_start, user_preferences)
 
-    async def _analyze_content_anthropic(self, images: List[Dict], max_pages: int, grade_level: str, interests: List[str], analysis_start: float) -> Dict:
+    async def _analyze_content_anthropic(self, images: List[Dict], max_pages: int, prompt: str, analysis_start: float, user_preferences: Dict) -> Dict:
         """Analyze content using Anthropic."""
         content = []
-        prompt = self._get_content_analysis_prompt(grade_level, interests)
 
         # Add images
         for i in range(max_pages):
@@ -778,23 +1298,22 @@ class ChineseProvider(AIProvider):
                     return result
 
             logger.warning(f"⚠️ Using fallback analysis for Anthropic")
-            return self._generate_fallback_analysis()
+            return await self._recover_or_fallback_content_analysis(prompt, user_preferences, analysis_start)
 
         except Exception as e:
             logger.error(f"❌ Error analyzing content with Anthropic: {e}")
-            return self._generate_fallback_analysis()
+            return await self._recover_or_fallback_content_analysis(prompt, user_preferences, analysis_start)
 
-    async def _analyze_content_zhipu(self, images: List[Dict], max_pages: int, grade_level: str, interests: List[str], analysis_start: float) -> Dict:
+    async def _analyze_content_zhipu(self, images: List[Dict], max_pages: int, prompt: str, analysis_start: float, user_preferences: Dict) -> Dict:
         """Analyze content using Zhipu."""
         content = []
-        prompt = self._get_content_analysis_prompt(grade_level, interests)
         content.append({"type": "text", "text": prompt})
 
         # Add images
         for i in range(max_pages):
             content.append({
                 "type": "image_url",
-                "image_url": {"url": images[i]['image_data']}
+                "image_url": {"url": f"data:image/png;base64,{images[i]['image_data']}"}
             })
 
         try:
@@ -823,11 +1342,32 @@ class ChineseProvider(AIProvider):
                         return result
 
             logger.warning(f"⚠️ Using fallback analysis for Zhipu")
-            return self._generate_fallback_analysis()
+            return await self._recover_or_fallback_content_analysis(prompt, user_preferences, analysis_start)
 
         except Exception as e:
             logger.error(f"❌ Error analyzing content with Zhipu: {e}")
-            return self._generate_fallback_analysis()
+            return await self._recover_or_fallback_content_analysis(prompt, user_preferences, analysis_start)
+
+    async def _recover_or_fallback_content_analysis(self, prompt: str, user_preferences: Dict, analysis_start: float) -> Dict:
+        """Retry content analysis with extracted PDF text only before falling back."""
+        if user_preferences.get("_pdf_text_context", {}).get("excerpt"):
+            try:
+                response = await self._run_zhipu_call(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    thinking_params={"type": "disabled"},
+                    max_tokens=4096
+                )
+                if response and response.choices and response.choices[0].message:
+                    parsed = _extract_json_from_text(response.choices[0].message.content)
+                    if parsed:
+                        total_analysis_time = time.time() - analysis_start
+                        logger.info(f"✅ Content analysis recovered from extracted PDF text in {total_analysis_time:.2f}s total")
+                        return parsed
+            except Exception as text_error:
+                logger.error(f"❌ Text-only content analysis failed: {text_error}")
+
+        return self._generate_fallback_analysis(user_preferences)
 
     async def generate_website(self, pdf_images: List[Dict], analysis: Dict, user_preferences: Dict) -> Dict:
         """Generate interactive learning website using the appropriate backend."""
@@ -1216,8 +1756,10 @@ document.addEventListener("DOMContentLoaded", function() {
             return ai_prompts.anthropic_knowledge_card_prompt(analysis)
         return ai_prompts.zhipu_knowledge_card_prompt(analysis)
 
-    def _generate_fallback_analysis(self) -> Dict:
+    def _generate_fallback_analysis(self, user_preferences: Optional[Dict] = None) -> Dict:
         """Generate fallback analysis when API fails."""
+        if user_preferences and user_preferences.get("_pdf_text_context", {}).get("excerpt"):
+            return _build_text_aware_fallback_analysis(user_preferences, language="zh")
         return {
             "main_topics": ["教育内容"],
             "key_concepts": ["学习", "理解"],
@@ -1235,7 +1777,11 @@ document.addEventListener("DOMContentLoaded", function() {
                     "key_steps": ["理解概念", "练习应用", "检查掌握程度"],
                     "complexity": "简单"
                 }
-            ]
+            ],
+            "analysis_diagnostics": {
+                "fallback_used": True,
+                "fallback_reason": "ai_content_analysis_failed_generic"
+            }
         }
 
     def _generate_fallback_html(self, pdf_images: List[Dict], analysis: Dict, user_preferences: Optional[Dict] = None) -> str:
@@ -1371,7 +1917,7 @@ class VisualEngine:
             model=self.ai_provider.text_model,
             messages=[{"role": "user", "content": prompt}],
             thinking_params={"type": "enabled"},
-            max_tokens=64000  # Increased for long HTML generation
+            max_tokens=int(os.getenv("HTML_GENERATION_MAX_TOKENS", "16000"))
         )
         
         if response and response.choices and response.choices[0].message:
@@ -1609,6 +2155,22 @@ class AIProcessor:
         metadata_time = time.time() - metadata_start
         logger.info(f"📋 PDF metadata extracted in {metadata_time:.2f}s - Pages: {metadata.get('page_count', 'unknown')}")
 
+        # Step 1.5: Extract text so English PDFs and non-vision models still get real source content.
+        text_start = time.time()
+        pdf_text_context = self.extract_pdf_text_context(pdf_path)
+        text_time = time.time() - text_start
+        logger.info(
+            "📝 PDF text extracted in %.2fs - pages with text: %s, chars: %s",
+            text_time,
+            pdf_text_context.get("pages_with_text", 0),
+            pdf_text_context.get("total_chars", 0)
+        )
+
+        analysis_preferences = {
+            **user_preferences,
+            "_pdf_text_context": pdf_text_context
+        }
+
         # Step 2: Convert PDF to images
         logger.info(f"🔄 Converting PDF to images...")
         conversion_start = time.time()
@@ -1619,7 +2181,7 @@ class AIProcessor:
         # Step 3: Analyze content with AI provider
         logger.info(f"🧠 Starting AI content analysis...")
         analysis_start = time.time()
-        content_analysis = await self.analyze_content_with_ai(pdf_images, user_preferences)
+        content_analysis = await self.analyze_content_with_ai(pdf_images, analysis_preferences)
         if not include_prerequisites and "prerequisite_knowledge" in content_analysis:
             content_analysis = {**content_analysis}
             content_analysis.pop("prerequisite_knowledge", None)
@@ -1695,6 +2257,9 @@ class AIProcessor:
                 "total_pages": len(pdf_images),
                 "pages_processed": min(len(pdf_images), 15),
                 "images_generated": len(pdf_images),
+                "pdf_text_chars": pdf_text_context.get("total_chars", 0),
+                "pdf_text_pages": pdf_text_context.get("pages_with_text", 0),
+                "analysis_diagnostics": content_analysis.get("analysis_diagnostics", {}),
                 "processing_method": f"ai-vision-{self.provider.get_provider_name().lower()}",
                 "ai_provider": self.provider.get_provider_name()
             }
@@ -1827,9 +2392,41 @@ class AIProcessor:
 
         except Exception as e:
             logger.error(f"❌ Error processing concept: {str(e)}")
+            error_text = str(e)
+            if "524" in error_text or "timeout" in error_text.lower() or "timed out" in error_text.lower():
+                logger.warning("⚠️ Concept generation timed out upstream; using local interactive fallback")
+                fallback_analysis = self._build_concept_fallback_analysis(concept_data)
+                fallback_website = self._build_local_interactive_website(
+                    fallback_analysis,
+                    user_preferences,
+                    fallback_reason=error_text
+                )
+                total_processing_time = time.time() - processing_start
+                return {
+                    "status": "success",
+                    "metadata": {
+                        "title": concept_data.get('concept_name', 'Concept Learning'),
+                        "subject": concept_data.get('subject', ''),
+                        "concept_overview": concept_data.get('concept_overview', ''),
+                        "page_count": 1,
+                        "source_type": "concept_input",
+                        "fallback_used": True
+                    },
+                    "analysis": fallback_analysis,
+                    "website": fallback_website,
+                    "processing_info": {
+                        "total_pages": 1,
+                        "pages_processed": 1,
+                        "processing_method": "concept-local-timeout-fallback",
+                        "ai_provider": self.provider.get_provider_name(),
+                        "concept_data": concept_data,
+                        "upstream_error": error_text,
+                        "total_time_seconds": round(total_processing_time, 2)
+                    }
+                }
             return {
                 "status": "error",
-                "error": str(e),
+                "error": error_text,
                 "metadata": {},
                 "analysis": {},
                 "website": None,
@@ -1838,6 +2435,74 @@ class AIProcessor:
                     "ai_provider": self.provider.get_provider_name()
                 }
             }
+
+    def _build_concept_fallback_analysis(self, concept_data: Dict) -> Dict:
+        """Build analysis from concept input when upstream generation times out."""
+        mastery_points = [
+            item.strip(" -\t\r")
+            for item in (concept_data.get('mastery_points') or '').split('\n')
+            if item.strip()
+        ]
+        design_points = [
+            item.strip(" -\t\r")
+            for item in (concept_data.get('design_idea') or '').split('\n')
+            if item.strip()
+        ]
+        concept_name = concept_data.get('concept_name') or '知识点'
+        overview = concept_data.get('concept_overview') or ''
+
+        procedural_steps = mastery_points[:6] or design_points[:6] or ["理解概念", "观察可视化", "完成练习反馈"]
+        return {
+            "main_topics": [concept_name],
+            "key_concepts": mastery_points or [concept_name],
+            "learning_objectives": mastery_points or [f"理解{concept_name}的核心思想"],
+            "prerequisite_knowledge": [],
+            "difficulty_level": "中级",
+            "target_grade_level": concept_data.get("grade_level", 10),
+            "content_structure": [
+                {
+                    "title": concept_name,
+                    "page_start": 1,
+                    "page_end": 1,
+                    "topics": mastery_points[:5] or [concept_name]
+                }
+            ],
+            "visual_elements": design_points,
+            "subject_area": concept_data.get('subject') or '综合教育',
+            "procedural_concepts": [
+                {
+                    "name": concept_name,
+                    "description": overview or f"围绕{concept_name}建立概念直觉、操作步骤和即时反馈。",
+                    "key_steps": procedural_steps,
+                    "complexity": "中等"
+                }
+            ],
+            "analysis_diagnostics": {
+                "fallback_used": True,
+                "fallback_reason": "upstream_generation_timeout"
+            }
+        }
+
+    def _build_local_interactive_website(self, analysis: Dict, user_preferences: Dict, fallback_reason: str = "") -> Dict:
+        """Generate a local deterministic interactive page from analysis."""
+        from .html_generation.heavy_generator import HeavyGenerator
+
+        html = HeavyGenerator(self.provider)._emergency_template(analysis, user_preferences)
+        return {
+            "html": html,
+            "metadata": {
+                "title": analysis.get("main_topics", ["学习页"])[0],
+                "subject": analysis.get("subject_area", "综合教育"),
+                "fallback_used": True,
+                "fallback_reason": "upstream_generation_timeout",
+            },
+            "interactive_elements": [],
+            "generation_info": {
+                "mode": "local_fallback",
+                "fallback_used": True,
+                "upstream_error": fallback_reason[:1000],
+            }
+        }
 
     async def generate_website_from_concept(self, concept_data: Dict, user_preferences: Optional[Dict] = None) -> Dict:
         """Generate website from concept using the configured AI provider."""
@@ -1869,6 +2534,51 @@ class AIProcessor:
         except Exception as e:
             print(f"Error extracting PDF metadata: {e}")
             return {"page_count": 0, "title": "Unknown"}
+
+    def extract_pdf_text_context(self, pdf_path: str, max_chars: int = 50000) -> Dict:
+        """Extract readable text from a PDF for content analysis prompts."""
+        pages = []
+        source = "pymupdf" if PYMUPDF_AVAILABLE else "pypdf2"
+
+        try:
+            if PYMUPDF_AVAILABLE:
+                doc = fitz.open(pdf_path)
+                try:
+                    for page_num in range(len(doc)):
+                        text = _compact_pdf_text(doc[page_num].get_text("text"))
+                        if text:
+                            pages.append({"page": page_num + 1, "text": text})
+                finally:
+                    doc.close()
+            else:
+                with open(pdf_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    for page_num, page in enumerate(pdf_reader.pages):
+                        text = _compact_pdf_text(page.extract_text() or "")
+                        if text:
+                            pages.append({"page": page_num + 1, "text": text})
+        except Exception as e:
+            logger.warning(f"⚠️ PDF text extraction failed: {e}")
+
+        total_chars = sum(len(page["text"]) for page in pages)
+        excerpts = []
+        remaining = max_chars
+        for page in pages:
+            if remaining <= 0:
+                break
+            page_text = page["text"]
+            block = f"[Page {page['page']}]\n{page_text}"
+            if len(block) > remaining:
+                block = block[:remaining]
+            excerpts.append(block)
+            remaining -= len(block) + 2
+
+        return {
+            "source": source,
+            "pages_with_text": len(pages),
+            "total_chars": total_chars,
+            "excerpt": "\n\n".join(excerpts),
+        }
 
     def convert_pdf_to_images(self, pdf_path: str) -> List[Dict]:
         """Convert PDF pages to images using PyMuPDF."""
@@ -2126,6 +2836,8 @@ class AIProcessor:
             available.append("zhipu")
         if ANTHROPIC_AVAILABLE:
             available.append("anthropic")
+        if OPENAI_SDK_AVAILABLE:
+            available.append("openai_compat")
         return available
 
 
@@ -2155,37 +2867,38 @@ def get_ai_processor():
         zhipu_api_key = os.getenv("ZHIPU_API_KEY")
         if zhipu_api_key:
             provider_config = {
-                'provider': 'zhipu',
+                'provider': 'chinese',
                 'api_key': zhipu_api_key,
-                'model': 'glm-4.6v'
+                'model': 'glm-4.6v',
+                'text_model': os.getenv("ZHIPU_TEXT_MODEL", "glm-4.7")
             }
             logger.info("Using Zhipu AI provider")
         else:
-            # Check for Anthropic API key
+            # Check for transfer station API key (supports Claude/GPT/DeepSeek/Gemini/Kimi)
+            transfer_api_key = os.getenv("TRANSFER_API_KEY")
             anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-            if anthropic_api_key:
+            api_key = transfer_api_key or anthropic_api_key
+            if api_key:
                 model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+                transfer_url = os.getenv("TRANSFER_BASE_URL", "")
+                base_url = transfer_url.replace("/v1", "") if transfer_url else os.getenv("ANTHROPIC_BASE_URL")
                 provider_config = {
-                    'provider': 'anthropic',
-                    'api_key': anthropic_api_key,
-                    'base_url': os.getenv("ANTHROPIC_BASE_URL"),
+                    'provider': 'chinese',
+                    'api_key': api_key,
+                    'base_url': base_url,
                     'model': model
                 }
-                logger.info(f"Using Anthropic provider with model {model}")
+                logger.info(f"Using Anthropic provider via transfer station with model {model}")
             else:
                 # Check for English API keys
                 english_api_key = (
                     os.getenv("ENGLISH_API_KEY") or
                     os.getenv("MIDDLE_TRANSFER_API_KEY") or
-                    os.getenv("GEMINI_API_KEY") or
+                    os.getenv("TRANSFER_API_KEY") or
                     os.getenv("OPENAI_API_KEY")
                 )
                 if english_api_key:
-                    # Determine model based on available keys
-                    model = os.getenv("ENGLISH_MODEL", "gpt-4.1")
-                    if os.getenv("GEMINI_API_KEY"):
-                        model = "gemini-3-pro-image-preview"
-
+                    model = os.getenv("ENGLISH_MODEL", "gpt-5.4")
                     provider_config = {
                         'provider': 'english',
                         'api_key': english_api_key,
@@ -2195,11 +2908,9 @@ def get_ai_processor():
                 else:
                     raise ValueError(
                         "No AI provider API key found. Please set one of:\n"
-                        "- ZHIPU_API_KEY (recommended for PPT processing)\n"
-                        "- ANTHROPIC_API_KEY\n"
+                        "- ZHIPU_API_KEY (recommended)\n"
+                        "- TRANSFER_API_KEY (for transfer station: Claude/GPT/DeepSeek/Gemini/Kimi)\n"
                         "- ENGLISH_API_KEY\n"
-                        "- MIDDLE_TRANSFER_API_KEY\n"
-                        "- GEMINI_API_KEY\n"
                         "- OPENAI_API_KEY"
                     )
 

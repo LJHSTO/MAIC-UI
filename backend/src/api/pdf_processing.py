@@ -22,8 +22,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Model to provider mapping
-CHINESE_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001",
-                  "glm-4.7", "glm-4.6", "glm-4.6v"]
+CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+                  "glm-4.7", "glm-4.6v",
+                  "gpt-5.4", "gpt-5.5",
+                  "deepseek-v4-pro", "deepseek-v4-flash",
+                  "gemini-3.1-pro",
+                  "kimi-k2.6",
+                  "minimax-m2.5", "qwen3.6-35b-a3b"]
 
 
 def get_provider_for_model(model: str) -> str:
@@ -64,13 +69,13 @@ def get_ai_processor(generation_mode: str = "fast", ai_model: Optional[str] = No
     if provider_type in ['english', 'gemini', 'openai']:
         if provider_type == 'gemini':
             model = ai_model or os.getenv('GEMINI_MODEL', 'gemini-3-pro-image-preview')
-            api_key = os.getenv('GEMINI_API_KEY') or os.getenv('ENGLISH_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY')
+            api_key = os.getenv('GEMINI_API_KEY') or os.getenv('ENGLISH_API_KEY') or os.getenv('TRANSFER_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY')
         elif provider_type == 'openai':
             model = ai_model or os.getenv('OPENAI_MODEL', 'gpt-4.1')
-            api_key = os.getenv('OPENAI_API_KEY') or os.getenv('ENGLISH_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY')
+            api_key = os.getenv('OPENAI_API_KEY') or os.getenv('ENGLISH_API_KEY') or os.getenv('TRANSFER_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY')
         else:  # english (default)
             model = ai_model or os.getenv('ENGLISH_MODEL', 'gpt-4.1')
-            api_key = os.getenv('ENGLISH_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY') or os.getenv('OPENAI_API_KEY') or os.getenv('GEMINI_API_KEY')
+            api_key = os.getenv('ENGLISH_API_KEY') or os.getenv('TRANSFER_API_KEY') or os.getenv('MIDDLE_TRANSFER_API_KEY') or os.getenv('OPENAI_API_KEY') or os.getenv('GEMINI_API_KEY')
 
         provider_config = {
             'provider': 'english',  # Always use unified English provider
@@ -81,14 +86,24 @@ def get_ai_processor(generation_mode: str = "fast", ai_model: Optional[str] = No
         # Unified Chinese provider - auto-detect backend from model name
         # For vision tasks, prefer glm-4.6v; for text generation, use specified model
         if ai_model and ai_model.startswith('claude-'):
-            # Anthropic model
+            # Anthropic model via transfer station
             model = ai_model
-            api_key = os.getenv('ANTHROPIC_API_KEY')
-            base_url = os.getenv('ANTHROPIC_BASE_URL')
+            api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
+            transfer_url = os.getenv('TRANSFER_BASE_URL', '')
+            base_url = transfer_url.replace('/v1', '') if transfer_url else os.getenv('ANTHROPIC_BASE_URL')
+        elif ai_model and ai_model in ["gpt-5.4", "gpt-5.5",
+                                        "deepseek-v4-pro", "deepseek-v4-flash",
+                                        "gemini-3.1-pro",
+                                        "kimi-k2.6",
+                                        "minimax-m2.5", "qwen3.6-35b-a3b"]:
+            # OpenAI-compatible model via transfer station
+            model = ai_model
+            api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('OPENAI_API_KEY')
+            base_url = os.getenv('TRANSFER_BASE_URL')
         else:
-            # Zhipu model (default)
-            model = 'glm-4.6v'  # Vision model for PDF processing
-            api_key = os.getenv('ZHIPU_API_KEY')
+            # Default: use transfer station for all models
+            model = ai_model or os.getenv('TRANSFER_MODEL', 'glm-4.7')
+            api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('ZHIPU_API_KEY')
             base_url = None
 
         text_model = ai_model if ai_model in CHINESE_MODELS else os.getenv('ZHIPU_MODEL', 'glm-4.7')

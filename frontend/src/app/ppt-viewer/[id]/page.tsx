@@ -7,7 +7,7 @@ import { WebEditor, DocumentVersion } from '@/components/WebEditor';
 import { VersionList } from '@/components/VersionList';
 
 
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
 interface SlideItem {
   type: 'slide';

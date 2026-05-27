@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>综合教育交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Source Han Sans CN', 'Microsoft YaHei', 'SimHei', sans-serif;
+            line-height: 1.7;
+        }
+        .step-card {
+            transition: all 0.25s ease;
+            border-left-width: 6px;
+        }
+        .step-pending {
+            border-left-color: #3b82f6;
+            background: #eff6ff;
+        }
+        .step-active {
+            border-left-color: #22c55e;
+            background: #f0fdf4;
+            transform: translateX(4px);
+            box-shadow: 0 10px 24px rgba(34, 197, 94, 0.16);
+        }
+        .step-completed {
+            border-left-color: #9ca3af;
+            background: #f9fafb;
+        }
+        .badge-pending {
+            background: #3b82f6;
+        }
+        .badge-active {
+            background: #22c55e;
+        }
+        .badge-completed {
+            background: #9ca3af;
+        }
+        canvas {
+            width: 100%;
+            height: 420px;
+            display: block;
+        }
+        input[type="range"] {
+            accent-color: #16a34a;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <header class="bg-white shadow-md p-4">
+        <h1 class="text-2xl md:text-3xl font-bold text-center text-gray-900">综合教育：理解材料的基本学习过程</h1>
+        <p class="text-center text-gray-600 mt-2 text-base">左侧展示学习步骤，右侧用数学学习曲线模拟“理解—练习—检查”的变化。</p>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+        <div class="simulation-container grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <div class="process-panel bg-white rounded-2xl shadow-lg p-6 flex flex-col">
+                <div class="mb-5">
+                    <h2 class="text-2xl font-bold text-gray-900">左侧：程序性过程展示</h2>
+                    <p class="text-gray-600 mt-2">观察右侧模拟时，本区域会自动高亮当前学习阶段。鼠标悬停步骤卡片，可在右侧查看对应元素。</p>
+                </div>
+
+                <div class="space-y-5 flex-1">
+                    <div id="step-0" class="step-card step-active rounded-xl p-5 cursor-pointer" data-step="0">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span id="badge-0" class="badge-active text-white rounded-full w-9 h-9 flex items-center justify-center font-bold">1</span>
+                            <h3 class="text-xl font-bold">步骤1：理解概念</h3>
+                            <span id="check-0" class="ml-auto text-gray-400 font-bold text-xl hidden">✓</span>
+                        </div>
+                        <p class="text-base text-gray-700">先把材料拆成关键概念与关系。例如在微积分、机器学习或人工智能中，要先明确“变量、函数、输入、输出、目标”分别是什么。</p>
+                        <p class="text-sm text-blue-700 mt-3">右侧对应：蓝色概念节点被点亮，表示正在建立初始理解。</p>
+                    </div>
+
+                    <div id="step-1" class="step-card step-pending rounded-xl p-5 cursor-pointer" data-step="1">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span id="badge-1" class="badge-pending text-white rounded-full w-9 h-9 flex items-center justify-center font-bold">2</span>
+                            <h3 class="text-xl font-bold">步骤2：练习应用</h3>
+                            <span id="check-1" class="ml-auto text-gray-400 font-bold text-xl hidden">✓</span>
+                        </div>
+                        <p class="text-base text-gray-700">通过题目、推导或小实验反复应用材料。练习越有效，误差下降越快，理解度提升越稳定。</p>
+                        <p class="text-sm text-green-700 mt-3">右侧对应：绿色下降曲线表示练习让错误率逐步降低。</p>
+                    </div>
+
+                    <div id="step-2" class="step-card step-pending rounded-xl p-5 cursor-pointer" data-step="2">
+                        <div class="flex items-center gap-3 mb-3">
+                            <span id="badge-2" class="badge-pending text-white rounded-full w-9 h-9 flex items-center justify-center font-bold">3</span>
+                            <h3 class="text-xl font-bold">步骤3：检查掌握程度</h3>
+                            <span id="check-2" class="ml-auto text-gray-400 font-bold text-xl hidden">✓</span>
+                        </div>
+                        <p class="text-base text-gray-700">用小测、讲解给他人、迁移到新问题等方式检查掌握程度。若掌握度不足，应返回步骤1或步骤2。</p>
+                        <p class="text-sm text-purple-700 mt-3">右侧对应：紫色阈值线与实时掌握度比较，判断是否达到理解目标。</p>
+                    </div>
+                </div>
+
+                <div id="feedbackBox" class="mt-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 font-semibold">
+                    当前任务：请点击“开始”，观察如何从理解概念进入练习应用。
+                </div>
+            </div>
+
+            <div class="simulation-panel bg-white rounded-2xl shadow-lg p-6 flex flex-col">
+                <div class="mb-4">
+                    <h2 class="text-2xl font-bold text-gray-900">右侧：交互式学习曲线模拟</h2>
+                    <p class="text-gray-600 mt-2">模型使用指数学习曲线：错误率 E(t)=E₀e<sup>−rt</sup>，掌握度 M(t)=100%−E(t)。</p>
+                </div>
+
+                <div class="rounded-2xl bg-gray-900 p-3">
+                    <canvas id="learningCanvas" width="760" height="420" aria-label="学习曲线模拟画布"></canvas>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+                    <button id="startPauseBtn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl transition">开始</button>
+                    <button id="resetBtn" class="bg-gray-700 hover:bg-gray-800 text-white font-bold py-3 px-4 rounded-xl transition">重置</button>
+                    <button id="nextStepBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition">进入下一步</button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
+                    <div class="bg-gray-50 rounded-xl p-4 border">
+                        <label for="complexitySlider" class="font-bold text-gray-800">材料复杂度：<span id="complexityValue">50</span></label>
+                        <input id="complexitySlider" type="range" min="10" max="100" value="50" class="w-full mt-3">
+                        <p class="text-sm text-gray-600 mt-2">复杂度越高，初始错误率越高，学习速度越慢。</p>
+                    </div>
+
+                    <div class="bg-gray-50 rounded-xl p-4 border">
+                        <label for="practiceSlider" class="font-bold text-gray-800">练习强度：<span id="practiceValue">55</span></label>
+                        <input id="practiceSlider" type="range" min="10" max="100" value="55" class="w-full mt-3">
+                        <p class="text-sm text-gray-600 mt-2">练习强度越高，错误率下降越快。</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+                    <div class="bg-blue-50 rounded-xl p-3 border border-blue-100">
+                        <div class="text-sm text-blue-700">当前步骤</div>
+                        <div id="currentStepData" class="text-lg font-bold">理解概念</div>
+                    </div>
+                    <div class="bg-green-50 rounded-xl p-3 border border-green-100">
+                        <div class="text-sm text-green-700">掌握度</div>
+                        <div id="masteryData" class="text-lg font-bold">0.0%</div>
+                    </div>
+                    <div class="bg-red-50 rounded-xl p-3 border border-red-100">
+                        <div class="text-sm text-red-700">错误率</div>
+                        <div id="errorData" class="text-lg font-bold">80.0%</div>
+                    </div>
+                    <div class="bg-purple-50 rounded-xl p-3 border border-purple-100">
+                        <div class="text-sm text-purple-700">学习时间</div>
+                        <div id="timeData" class="text-lg font-bold">0.0</div>
+                    </div>
+                </div>
+
+                <div class="mt-5 bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-yellow-900">
+                    <strong>判定规则：</strong>当掌握度达到 85% 以上时，系统认为“理解材料”目标已达成；否则建议继续练习或回到概念理解。
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 获取界面元素
+        const canvas = document.getElementById('learningCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const startPauseBtn = document.getElementById('startPauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const nextStepBtn = document.getElementById('nextStepBtn');
+        const complexitySlider = document.getElementById('complexitySlider');
+        const practiceSlider = document.getElementById('practiceSlider');
+        const complexityValue = document.getElementById('complexityValue');
+        const practiceValue = document.getElementById('practiceValue');
+
+        const currentStepData = document.getElementById('currentStepData');
+        const masteryData = document.getElementById('masteryData');
+        const errorData = document.getElementById('errorData');
+        const timeData = document.getElementById('timeData');
+        const feedbackBox = document.getElementById('feedbackBox');
+
+        const stepNames = ['理解概念', '练习应用', '检查掌握程度'];
+        const stepMessages = [
+            '当前任务：识别关键概念，建立材料的初始心理模型。',
+            '太棒了！已完成步骤1。现在进入练习应用，让错误率随练习下降。',
+            '太棒了！已完成步骤2。现在检查掌握程度，判断是否达到理解目标。'
+        ];
+
+        let currentStep = 0;
+        let isRunning = false;
+        let lastTimestamp = null;
+        let learningTime = 0;
+        let hoverStep = null;
+        let completedSteps = [false, false, false];
+
+        function getModelValues() {
+            const complexity = Number(complexitySlider.value);
+            const practice = Number(practiceSlider.value);
+
+            // 数学模型：复杂度提高初始错误率，并降低学习速率；练习强度提高学习速率。
+            const initialError = Math.min(95, 45 + complexity * 0.5);
+            const rate = Math.max(0.015, (practice / 100) * 0.19 - (complexity / 100) * 0.07 + 0.035);
+            const error = initialError * Math.exp(-rate * learningTime);
+            const mastery = Math.max(0, Math.min(100, 100 - error));
+
+            return { complexity, practice, initialError, rate, error, mastery };
+        }
+
+        function setStep(stepIndex, automatic) {
+            currentStep = Math.max(0, Math.min(2, stepIndex));
+
+            if (currentStep > 0) completedSteps[0] = true;
+            if (currentStep > 1) completedSteps[1] = true;
+
+            updateStepPanel();
+
+            currentStepData.textContent = stepNames[currentStep];
+            feedbackBox.textContent = stepMessages[currentStep];
+
+            if (automatic) {
+                feedbackBox.className = 'mt-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 font-semibold';
+            }
+        }
+
+        function updateStepPanel() {
+            for (let i = 0; i < 3; i++) {
+                const card = document.getElementById(`step-${i}`);
+                const badge = document.getElementById(`badge-${i}`);
+                const check = document.getElementById(`check-${i}`);
+
+                card.classList.remove('step-pending', 'step-active', 'step-completed');
+                badge.classList.remove('badge-pending', 'badge-active', 'badge-completed');
+
+                if (completedSteps[i]) {
+                    card.classList.add('step-completed');
+                    badge.classList.add('badge-completed');
+                    check.classList.remove('hidden');
+                } else if (i === currentStep) {
+                    card.classList.add('step-active');
+                    badge.classList.add('badge-active');
+                    check.classList.add('hidden');
+                } else {
+                    card.classList.add('step-pending');
+                    badge.classList.add('badge-pending');
+                    check.classList.add('hidden');
+                }
+            }
+        }
+
+        function drawRoundedRect(x, y, w, h, r, fillStyle) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+            ctx.fillStyle = fillStyle;
+            ctx.fill();
+        }
+
+        function drawCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            const ratio = window.devicePixelRatio || 1;
+            const displayWidth = Math.floor(rect.width * ratio);
+            const displayHeight = Math.floor(rect.height * ratio);
+
+            if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
+            }
+
+            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+
+            const width = rect.width;
+            const height = rect.height;
+            const padding = 48;
+            const graphX = padding;
+            const graphY = 58;
+            const graphW = width - padding * 2;
+            const graphH = height - 125;
+
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.fillStyle = '#111827';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = '#f9fafb';
+            ctx.font = '700 20px Microsoft YaHei';
+            ctx.fillText('学习过程模拟：错误率下降与掌握度提升', 24, 32);
+
+            const values = getModelValues();
+
+            // 绘制坐标背景
+            drawRoundedRect(graphX - 12, graphY - 12, graphW + 24, graphH + 24, 14, '#1f2937');
+
+            ctx.strokeStyle = '#374151';
+            ctx.lineWidth = 1;
+            ctx.font = '12px Microsoft YaHei';
+            ctx.fillStyle = '#d1d5db';
+
+            for (let i = 0; i <= 5; i++) {
+                const y = graphY + graphH - i * graphH / 5;
+                ctx.beginPath();
+                ctx.moveTo(graphX, y);
+                ctx.lineTo(graphX + graphW, y);
+                ctx.stroke();
+                ctx.fillText(`${i * 20}%`, 10, y + 4);
+            }
+
+            for (let i = 0; i <= 6; i++) {
+                const x = graphX + i * graphW / 6;
+                ctx.beginPath();
+                ctx.moveTo(x, graphY);
+                ctx.lineTo(x, graphY + graphH);
+                ctx.stroke();
+            }
+
+            // 85%掌握阈值
+            const thresholdY = graphY + graphH - 85 * graphH / 100;
+            ctx.setLineDash([8, 6]);
+            ctx.strokeStyle = '#a855f7';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(graphX, thresholdY);
+            ctx.lineTo(graphX + graphW, thresholdY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#d8b4fe';
+            ctx.fillText('掌握阈值：85%', graphX + graphW - 105, thresholdY - 8);
+
+            // 绘制错误率曲线
+            const maxT = 36;
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            for (let i = 0; i <= 240; i++) {
+                const t = i / 240 * maxT;
+                const e = values.initialError * Math.exp(-values.rate * t);
+                const m = Math.max(0, Math.min(100, 100 - e));
+                const x = graphX + (t / maxT) * graphW;
+                const y = graphY + graphH - (m / 100) * graphH;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // 当前点
+            const currentT = Math.min(maxT, learningTime);
+            const pointX = graphX + currentT / maxT * graphW;
+            const pointY = graphY + graphH - values.mastery / 100 * graphH;
+
+            ctx.fillStyle = currentStep === 0 ? '#3b82f6' : currentStep === 1 ? '#22c55e' : '#a855f7';
+            ctx.beginPath();
+            ctx.arc(pointX, pointY, 9, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 步骤区域标记
+            const zones = [
+                { x: graphX, w: graphW * 0.28, color: 'rgba(59, 130, 246, 0.12)', text: '理解概念' },
+                { x: graphX + graphW * 0.28, w: graphW * 0.44, color: 'rgba(34, 197, 94, 0.12)', text: '练习应用' },
+                { x: graphX + graphW * 0.72, w: graphW * 0.28, color: 'rgba(168, 85, 247, 0.12)', text: '检查掌握' }
+            ];
+
+            zones.forEach((zone, index) => {
+                ctx.fillStyle = hoverStep === index || currentStep === index ? zone.color.replace('0.12', '0.28') : zone.color;
+                ctx.fillRect(zone.x, graphY, zone.w, graphH);
+
+                ctx.fillStyle = index === 0 ? '#93c5fd' : index === 1 ? '#86efac' : '#d8b4fe';
+                ctx.font = '700 14px Microsoft YaHei';
+                ctx.fillText(zone.text, zone.x + 12, graphY + 24);
+            });
+
+            // 重新覆盖曲线，保证可见
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            for (let i = 0; i <= 240; i++) {
+                const t = i / 240 * maxT;
+                const e = values.initialError * Math.exp(-values.rate * t);
+                const m = Math.max(0, Math.min(100, 100 - e));
+                const x = graphX + (t / maxT) * graphW;
+                const y = graphY + graphH - (m / 100) * graphH;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pointX, pointY, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = currentStep === 0 ? '#3b82f6' : currentStep === 1 ? '#22c55e' : '#a855f7';
+            ctx.beginPath();
+            ctx.arc(pointX, pointY, 7, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 概念节点可视化
+            const nodeY = height - 52;
+            const nodes = [
+                { x: width * 0.2, label: '材料', color: '#3b82f6' },
+                { x: width * 0.5, label: '应用', color: '#22c55e' },
+                { x: width * 0.8, label: '掌握', color: '#a855f7' }
+            ];
+
+            ctx.strokeStyle = '#4b5563';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(nodes[0].x, nodeY);
+            ctx.lineTo(nodes[1].x, nodeY);
+            ctx.lineTo(nodes[2].x, nodeY);
+            ctx.stroke();
+
+            nodes.forEach((node, index) => {
+                const active = index === currentStep || index === hoverStep || completedSteps[index];
+                ctx.fillStyle = active ? node.color : '#374151';
+                ctx.beginPath();
+                ctx.arc(node.x, nodeY, active ? 18 : 14, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '700 14px Microsoft YaHei';
+                ctx.textAlign = 'center';
+                ctx.fillText(node.label, node.x, nodeY + 38);
+                ctx.textAlign = 'left';
+            });
+
+            // 数据标签
+            ctx.fillStyle = '#e5e7eb';
+            ctx.font = '14px Microsoft YaHei';
+            ctx.fillText(`当前掌握度：${values.mastery.toFixed(1)}%`, graphX, graphY + graphH + 42);
+            ctx.fillText(`学习速率 r：${values.rate.toFixed(3)}`, graphX + 170, graphY + graphH + 42);
+            ctx.fillText(`模型：E(t)=E₀e−rt`, graphX + 320, graphY + graphH + 42);
+
+            // 步骤提示
+            ctx.fillStyle = '#fef3c7';
+            ctx.font = '700 15px Microsoft YaHei';
+            const hint = currentStep === 0
+                ? '观察蓝色区域：先建立概念框架。'
+                : currentStep === 1
+                    ? '观察绿色曲线：练习让错误率指数下降。'
+                    : '观察紫色阈值：检查是否达到理解目标。';
+            ctx.fillText(hint, 24, height - 14);
+        }
+
+        function updateDataPanel() {
+            const values = getModelValues();
+            masteryData.textContent = `${values.mastery.toFixed(1)}%`;
+            errorData.textContent = `${values.error.toFixed(1)}%`;
+            timeData.textContent = learningTime.toFixed(1);
+
+            if (learningTime >= 4 && currentStep === 0) {
+                completedSteps[0] = true;
+                setStep(1, true);
+            }
+
+            if (learningTime >= 18 && currentStep === 1) {
+                completedSteps[1] = true;
+                setStep(2, true);
+            }
+
+            if (currentStep === 2 && values.mastery >= 85 && !completedSteps[2]) {
+                completedSteps[2] = true;
+                feedbackBox.textContent = '太棒了！已完成步骤3。你已经达到“理解材料”的目标。';
+                feedbackBox.className = 'mt-6 p-4 rounded-xl bg-purple-50 border border-purple-200 text-purple-800 font-semibold';
+                updateStepPanel();
+            }
+        }
+
+        function animate(timestamp) {
+            if (!lastTimestamp) lastTimestamp = timestamp;
+            const delta = Math.min(0.05, (timestamp - lastTimestamp) / 1000);
+            lastTimestamp = timestamp;
+
+            if (isRunning) {
+                learningTime += delta * 2.2;
+                if (learningTime > 36) {
+                    learningTime = 36;
+                    isRunning = false;
+                    startPauseBtn.textContent = '继续';
+                }
+                updateDataPanel();
+            }
+
+            drawCanvas();
+            requestAnimationFrame(animate);
+        }
+
+        startPauseBtn.addEventListener('click', () => {
+            isRunning = !isRunning;
+            startPauseBtn.textContent = isRunning ? '暂停' : '继续';
+            if (isRunning && currentStep === 0) {
+                feedbackBox.textContent = '正在进行步骤1：请观察蓝色概念节点，理解材料结构。';
+            }
+            lastTimestamp = null;
+        });
+
+        resetBtn.addEventListener('click', () => {
+            isRunning = false;
+            learningTime = 0;
+            currentStep = 0;
+            completedSteps = [false, false, false];
+            startPauseBtn.textContent = '开始';
+            feedbackBox.textContent = '已重置。请点击“开始”，重新体验基本学习过程。';
+            feedbackBox.className = 'mt-6 p-4 rounded-xl bg-green-50 border border-green-200 text-green-800 font-semibold';
+            updateStepPanel();
+            updateDataPanel();
+            drawCanvas();
+        });
+
+        nextStepBtn.addEventListener('click', () => {
+            if (currentStep < 2) {
+                completedSteps[currentStep] = true;
+                setStep(currentStep + 1, true);
+            } else {
+                const values = getModelValues();
+                if (values.mastery >= 85) {
+                    completedSteps[2] = true;
+                    feedbackBox.textContent = '太棒了！已完成步骤3。你的掌握度已达到目标。';
+                } else {
+                    feedbackBox.textContent = '掌握度暂未达到85%。建议继续练习，或调高练习强度后观察变化。';
+                }
+                updateStepPanel();
+            }
+        });
+
+        complexitySlider.addEventListener('input', () => {
+            complexityValue.textContent = complexitySlider.value;
+            updateDataPanel();
+            drawCanvas();
+        });
+
+        practiceSlider.addEventListener('input', () => {
+            practiceValue.textContent = practiceSlider.value;
+            updateDataPanel();
+            drawCanvas();
+        });
+
+        document.querySelectorAll('.step-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                hoverStep = Number(card.dataset.step);
+                drawCanvas();
+            });
+
+            card.addEventListener('mouseleave', () => {
+                hoverStep = null;
+                drawCanvas();
+            });
+
+            card.addEventListener('click', () => {
+                const selected = Number(card.dataset.step);
+                if (selected > currentStep) {
+                    for (let i = 0; i < selected; i++) completedSteps[i] = true;
+                }
+                setStep(selected, false);
+                feedbackBox.textContent = `你选择了步骤${selected + 1}：${stepNames[selected]}。右侧已高亮对应区域。`;
+                drawCanvas();
+            });
+        });
+
+        window.addEventListener('resize', drawCanvas);
+
+        // 初始化界面
+        complexityValue.textContent = complexitySlider.value;
+        practiceValue.textContent = practiceSlider.value;
+        updateStepPanel();
+        updateDataPanel();
+        drawCanvas();
+        requestAnimationFrame(animate);
+    </script>
+</body>
+</html>

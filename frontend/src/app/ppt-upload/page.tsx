@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { QRCodeHover } from '@/components/QRCodeHover';
 import Cookies from 'js-cookie';
-const API_BASE_URL = process.env.NODE_ENV === 'production' ? '/api' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api');
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
 interface PPTDocument {
   id: number;
