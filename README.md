@@ -1,260 +1,204 @@
-# 🤔Why MAIC-UI?
+﻿<p align="center">
+  <img src="assets/readme.gif" width="100%" alt="MAIC-UI demo"/>
+</p>
 
-- Turn abstract knowledge into interactive experiences
-- Reduce the cost of creating teaching resources
-- Support real classroom use with stable generated results
-- Help students learn by exploring, not just watching
+<h1 align="center">MAIC-UI</h1>
+<p align="center"><strong>AI-Powered Interactive Course Generation System</strong></p>
+<p align="center">From MOOC to MAIC: Reimagine Online Teaching and Learning through LLM-driven Agents</p>
 
-# 📖 Introduction
+---
 
-**Let knowledge grow into interfaces, and let interaction flow into thinking.**
+## What is MAIC-UI?
 
-MAIC-UI is an **AI-powered interactive teaching generation system** designed for educational scenarios across all grade levels. Centered on generative AI and interactive interface generation, it helps teachers quickly build teaching resources for classroom instruction, self-directed learning, experiment demonstrations, and knowledge exploration.
+MAIC-UI is an AI-powered interactive teaching generation system. It transforms PDFs, PowerPoint slides, and concept descriptions into rich, interactive HTML learning courses — complete with exercises, simulations, and guided exploration.
 
-<img src="assets/readme.gif" width="100%"/>
+> **Let knowledge grow into interfaces, and let interaction flow into thinking.**
 
-Unlike traditional static courseware or one-way content generation tools, MAIC-UI focuses not only on **content generation**, but also on **learning process generation**. It aims to transform abstract knowledge into visual, operable, and feedback-driven interactive pages, so that students do not merely *see* knowledge, but can also *manipulate*, *experience*, and *understand* it.
+Unlike static courseware, MAIC-UI generates both **content** and **learning process** — students don't just read knowledge, they manipulate, experience, and understand it.
 
-## 💡 Key Highlights
+## Quick Start
 
-- **AI-driven generation** — Create teaching pages and interactive content from topic inputs.
-- **From content to interaction** — Generate not only content, but also interactive learning interfaces.
-- **Versatile teaching support** — Suitable for explanations, demonstrations, simulations, and review activities.
-- **Process-oriented learning** — Strengthen engagement through guidance, interaction, and feedback.
-- **Classroom-ready design** — Built for stable, controllable, and effective classroom use.
-
-## 📍 Positioning
-
-MAIC-UI aims to address more than just the efficiency problem of courseware production. More importantly, it responds to several core needs in educational scenarios:
-
-- How can abstract knowledge become more intuitive?  
-- How can classroom presentation turn into student participation?  
-- How can AI go beyond assisting content writing to supporting learning experience design?  
-
-Therefore, MAIC-UI is not merely a traditional content generator, but rather:
-
-**An AI interactive teaching interface generation system designed for classroom and learning scenarios.**
-
-# 🚀 Quick Start
-
-## Prerequisites
+### Prerequisites
 
 - Docker & Docker Compose
 - Git
 
-## 1. Clone the Repository
+### 1. Clone
 
 ```bash
-git clone https://github.com/your-username/maic-ui.git
-cd maic-ui
+git clone https://github.com/LJHSTO/MAIC-UI.git
+cd MAIC-UI
 ```
 
-## 2. Configure Environment
+### 2. Configure Environment
 
 ```bash
-# Copy the example environment file
 cp .env.example .env
-
-# Edit .env and add your API keys
-# Required: AI_PROVIDER and corresponding API key (zhipu, anthropic, openai, etc.)
-vim .env
+# Edit .env and add your SiliconFlow API key:
+#   TRANSFER_API_KEY=sk-...
 ```
 
-**Key Environment Variables:**
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `AI_PROVIDER` | AI provider to use (`zhipu`, `anthropic`, `openai`, etc.) | Yes |
-| `ZHIPU_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | API key for your chosen provider | Yes |
-| `SECRET_KEY` | Secret key for JWT authentication | Yes |
-| `DATABASE_URL` | Database connection string (SQLite by default) | No |
-
-## 3. Deploy with Docker Compose
+### 3. Deploy
 
 ```bash
-# Build and start all services
 docker compose build
 docker compose up -d
-
-# Or build and start in one command
-docker compose up -d --build
 ```
 
-The application will be available at **http://localhost:8927**
-
-## 4. Verify Deployment
-
-```bash
-# Check container status
-docker compose ps
-
-# Check backend health
-curl http://localhost:8927/health
-```
-
-## Service Architecture
+Open **http://localhost:8927** in your browser.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| nginx | 8927 | Reverse proxy (public entry point) |
+| nginx | 8927 | Reverse proxy (public entry) |
 | frontend | 3000 | Next.js application |
 | backend | 8000 | FastAPI application |
 
----
-
-## Development Mode (Optional)
-
-For local development without Docker:
+## Development Mode
 
 ```bash
-# Install dependencies
-npm run install:all
-
-# Start both frontend and backend
-npm run dev
-
-# Or start separately
-npm run dev:frontend  # Frontend on port 3000
-npm run dev:backend   # Backend on port 8000
+npm run install:all   # Install all dependencies
+npm run dev           # Start frontend (3000) + backend (8000)
 ```
 
-# ✨ Features
+## Features
 
-## ✏️ Use Cases
+###  Use Cases
 
-MAIC-UI can be applied to the following typical teaching scenarios:
+| Scenario | Description |
+|----------|-------------|
+| **Lesson Introduction** | Attract students' attention with intuitive interactive pages |
+| **Knowledge Explanation** | Transform abstract concepts into visual + interactive content |
+| **Experiment Simulation** | Demonstrate processes when lab equipment is limited |
+| **After-Class Consolidation** | Strengthen understanding through interactive exercises |
 
-<table>
-<tr>
-<td width="50%" valign="top">
+![Lesson Introduction](assets/Lesson_Introduction.PNG)
+![Knowledge Explanation](assets/Knowledge_explanation.PNG)
+![Experiment Simulation](assets/Experiment_simulation.PNG)
+![Consolidation](assets/consolidation.PNG)
 
-**🎯 Lesson Introduction**
+### Advantages
 
-Attract students’ attention and stimulate interest through intuitive pages.
+| Dimension | Traditional Courseware | **MAIC-UI** |
+|:--|:--|:--|
+| Production threshold | High, manual design | **Low, AI-generated** |
+| Content form | Static presentation | **Dynamic + interactive** |
+| Student role | Passive viewer | **Active participant** |
+| Abstract knowledge | Hard to express | **Visual + manipulable** |
+| Teaching adaptability | High adjustment cost | **Quick regeneration** |
 
-<img src="assets/Lesson_Introduction.PNG" width="100%"/>
+##  Batch Course Generation (CLI)
 
-</td>
-<td width="50%" valign="top">
+Generate courses in bulk without opening the browser:
 
-**📚 Knowledge Explanation**
+```cmd
+# Windows (cmd / PowerShell)
+1. copy .env.batch.example .env.batch  →  edit MAIC_API_BASE
+2. maic-gen setup                       →  register & verify
+3. maic-gen concept examples\\concept_derivative.json
+4. maic-batch examples\\batch_courses.tsv
+```
 
-Transform abstract concepts into visual and interactive content.
+```bash
+# Linux / macOS / Git Bash
+MAIC_API_BASE=http://HOST_IP:8000/api \
+  MAIC_EMAIL=user@example.com \
+  MAIC_PASSWORD='password' \
+  ./scripts/maic_generate_course.sh concept examples/concept_derivative.json
 
-<img src="assets/Knowledge_explanation.PNG" width="100%"/>
+./scripts/maic_batch_generate.sh examples/batch_courses.tsv
+```
 
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
+See [docs/MAIC_BATCH_GENERATION.md](docs/MAIC_BATCH_GENERATION.md) for full documentation.
 
-**🔬 Experiment Simulation**
+## Project Structure
 
-Demonstrate processes when laboratory equipment or conditions are limited.
-
-<img src="assets/Experiment_simulation.PNG" width="100%"/>
-
-</td>
-<td width="50%" valign="top">
-
-**📝 After-class Consolidation**
-
-Strengthen understanding and transfer of knowledge through interactive exercises.
-
-<img src="assets/consolidation.PNG" width="100%"/>
-
-</td>
-</tr>
-</table>
-
-## 🌟 Advantages
-
-| Dimension                     | Traditional Courseware / Resource Production           | **MAIC-UI**                                               |
-| :---------------------------- | :----------------------------------------------------- | :-------------------------------------------------------- |
-| Production threshold          | High, relies on manual design and technical operations | Lower, can generate quickly                               |
-| Content form                  | Mainly static presentation                             | Dynamic and interactive presentation                      |
-| Student role                  | Passive viewer                                         | Active participant and explorer                           |
-| Abstract knowledge expression | Difficult to present complex processes                 | Better suited for expressing dynamic patterns             |
-| Teaching adaptability         | High adjustment cost                                   | More suitable for quickly generating for different topics |
-| Classroom performance         | Strong in presentation, weak in interaction            | Balances both presentation and interaction                |
-
-# 🤝 Contributing
-
-We welcome contributions from the community. Whether it is a bug report, feature suggestion, or pull request, we truly appreciate it.
-
-**Contribution Process**
-
-## 🧩 Project Structure
-
-```Bash
+```
 MAIC-UI/
-├── frontend/                # Frontend project
-│   ├── public/              # Static assets
+├── frontend/                     # Next.js + React + TypeScript
 │   ├── src/
-│   │   ├── app/             # Page routes
-│   │   ├── components/      # Shared components
-│   │   ├── styles/          # Style files
-│   │   └── utils/           # Utility functions
+│   │   ├── app/                  # Page routes
+│   │   ├── components/           # Shared components
+│   │   │   ├── providers/        # LanguageProvider, ModelSettingsProvider
+│   │   │   ├── pdf/              # PDF upload & viewer components
+│   │   │   ├── ppt-viewer/       # PPT upload & viewer components
+│   │   │   └── WebEditor/        # Rich course editor
+│   │   └── services/             # API client layer
 │   └── package.json
-│
-├── backend/                 # Backend project
+├── backend/                      # FastAPI + SQLAlchemy
 │   ├── src/
-│   │   ├── api/             # API layer
-│   │   ├── service/         # Business logic
-│   │   ├── models/          # Data models
-│   │   └── core/            # Configuration and core functions
-│   ├── requirements.txt
+│   │   ├── api/                  # Route handlers
+│   │   ├── services/             # AI processing, personalization, generation
+│   │   │   └── html_generation/  # Heavy & fast HTML generators
+│   │   ├── models/               # SQLAlchemy ORM models
+│   │   └── core/                 # Config, database, security
 │   └── main.py
-│
-├── docs/                    # Documentation
-├── screenshots/             # Project screenshots
+├── scripts/                      # Batch generation CLI
+│   ├── maic_generate_course.sh   # Single course (bash)
+│   ├── maic_batch_generate.sh    # Batch dispatcher (bash)
+│   ├── maic_generate.ps1         # Single course (PowerShell)
+│   ├── maic_batch.ps1            # Batch dispatcher (PowerShell)
+│   └── maic_share_backend.sh     # Expose backend to LAN
+├── examples/                     # Batch manifest examples
+├── docs/                         # Documentation
 ├── docker-compose.yml
 └── README.md
 ```
 
-## 🏗️ Core Architecture
+##  Supported AI Models
 
-MAIC-UI adopts a **frontend-backend separated architecture**, consisting of the following main parts:
+MAIC-UI supports 20+ models via a unified SiliconFlow transfer station:
 
-- **Frontend layer**: responsible for user interaction, page presentation, and teaching resource display 
-- **Backend layer**: responsible for business logic processing, API management, and generation workflow scheduling 
-- **AI generation layer**: responsible for teaching content generation, page organization, and interactive resource construction 
-- **Data layer**: responsible for user information, resource configuration, and generated result management 
+| Provider | Models |
+|----------|--------|
+| **Zhipu** | GLM-4.7, GLM-4.6, GLM-5.1 |
+| **Anthropic** | Claude Opus 4.6/4.7, Sonnet 4.5/4.6, Haiku 4.5 |
+| **OpenAI** | GPT-5, GPT-5.4, GPT-5.5, GPT-4.1 Mini |
+| **DeepSeek** | V4 Pro (1M context), V4 Flash |
+| **Google** | Gemini 3.1 Pro, 3.5 Flash, 3 Flash, 2.5 Pro |
+| **Qwen** | Qwen3.6 35B A3B, Qwen Plus, Max, Turbo |
+| **Moonshot** | Kimi K2.6 |
+| **MiniMax** | MiniMax M2.5 |
 
-The system operates around the following workflow:
+## Core Architecture
 
-**Input teaching requirements → Generate teaching content → Build interactive pages → Display teaching resources**
+The system operates around this pipeline:
 
-## 🔧How to Contribute
+```
+PDF/PPT/Concept Input  →  AI Content Generation  →  Interactive Page Building  →  Learning Delivery
+```
 
-# 💼 Business Cooperation
+- **Frontend layer**: User interaction, page presentation, resource display
+- **Backend layer**: Business logic, API management, generation workflow scheduling
+- **AI generation layer**: Content generation, page organization, interactive resource construction
+- **Data layer**: User profiles, resource configuration, generation results
 
-If you would like to apply MAIC-UI to educational products, learning platforms, course resource development, or school-enterprise cooperation scenarios, feel free to contact us for further collaboration.
+## Contributing
 
-- **Project Email**: tsq25@mails.tsinghua.edu.cn
+We welcome bug reports, feature suggestions, and pull requests.
 
-## 📝 Citation
+## Business Cooperation
 
-If MAIC-UI is helpful to your research or project, please consider citing this project.
+For educational products, learning platforms, course resource development, or institutional partnerships:
 
+- **Email**: tsq25@mails.tsinghua.edu.cn
+
+## Citation
 
 ```bibtex
 @Article{JCST-2509-16000,
-  title = {From MOOC to MAIC: Reimagine Online Teaching and Learning through LLM-driven Agents},
-  journal = {Journal of Computer Science and Technology},
-  volume = {},
-  number = {},
-  pages = {},
-  year = {2026},
-  issn = {1000-9000(Print) /1860-4749(Online)},
-  doi = {10.1007/s11390-025-6000-0},
-  url = {https://jcst.ict.ac.cn/en/article/doi/10.1007/s11390-025-6000-0},
-  author = {Ji-Fan Yu and Daniel Zhang-Li and Zhe-Yuan Zhang and Yu-Cheng Wang and Hao-Xuan Li and Joy Jia Yin Lim and Zhan-Xin Hao and Shang-Qing Tu and Lu Zhang and Xu-Sheng Dai and Jian-Xiao Jiang and Shen Yang and Fei Qin and Ze-Kun Li and Xin Cong and Bin Xu and Lei Hou and Man-Li Li and Juan-Zi Li and Hui-Qin Liu and Yu Zhang and Zhi-Yuan Liu and Mao-Song Sun}
+  title     = {From MOOC to MAIC: Reimagine Online Teaching and Learning through LLM-driven Agents},
+  journal   = {Journal of Computer Science and Technology},
+  year      = {2026},
+  doi       = {10.1007/s11390-025-6000-0},
+  url       = {https://jcst.ict.ac.cn/en/article/doi/10.1007/s11390-025-6000-0},
+  author    = {Ji-Fan Yu and Daniel Zhang-Li and Zhe-Yuan Zhang and Yu-Cheng Wang and Hao-Xuan Li
+               and Joy Jia Yin Lim and Zhan-Xin Hao and Shang-Qing Tu and Lu Zhang and Xu-Sheng Dai
+               and Jian-Xiao Jiang and Shen Yang and Fei Qin and Ze-Kun Li and Xin Cong and Bin Xu
+               and Lei Hou and Man-Li Li and Juan-Zi Li and Hui-Qin Liu and Yu Zhang
+               and Zhi-Yuan Liu and Mao-Song Sun}
 }
 ```
 
-## ⭐ Star History
+## Star History
 
-If this project helps you, please consider giving it a star to support us.
-
-[![Star History Chart](https://api.star-history.com/svg?repos=THU-MAIC/MAIC-UI&type=Date)](https://star-history.com/#THU-MAIC/MAIC-UI&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=LJHSTO/MAIC-UI&type=Date)](https://star-history.com/#LJHSTO/MAIC-UI&Date)
