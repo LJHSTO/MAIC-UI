@@ -13,112 +13,184 @@ interface NavigationProps {
   onLogout?: () => void
 }
 
+type ModelOption = {
+  value: AIModel
+  label: string
+  description: string
+  provider: 'Zhipu' | 'Innospark' | 'SiliconFlow'
+}
+
+const models: ModelOption[] = [
+  {
+    value: 'glm-4.7',
+    label: 'GLM-4.7',
+    description: 'Zhipu official model',
+    provider: 'Zhipu',
+  },
+  {
+    value: 'glm-5',
+    label: 'GLM-5',
+    description: 'Zhipu latest generation model',
+    provider: 'Zhipu',
+  },
+  {
+    value: 'glm-5.1',
+    label: 'GLM-5.1',
+    description: 'Zhipu flagship model',
+    provider: 'Zhipu',
+  },
+  {
+    value: 'gpt-5.4',
+    label: 'GPT-5.4',
+    description: 'OpenAI model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'claude-opus-4-6',
+    label: 'Claude Opus 4.6',
+    description: 'Anthropic model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'claude-sonnet-4-6',
+    label: 'Claude Sonnet 4.6',
+    description: 'Anthropic model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'gemini-3.1-pro-preview',
+    label: 'Gemini 3.1 Pro Preview',
+    description: 'Google model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'gemini-3-flash-preview',
+    label: 'Gemini 3 Flash Preview',
+    description: 'Google fast model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'deepseek-v4-pro',
+    label: 'DeepSeek V4 Pro',
+    description: 'DeepSeek model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'deepseek-v4-flash',
+    label: 'DeepSeek V4 Flash',
+    description: 'DeepSeek fast model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'doubao-seed-2-0-pro-260215',
+    label: 'Doubao Seed 2.0 Pro',
+    description: 'Doubao model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'doubao-seed-2-0-code-preview-260215',
+    label: 'Doubao Seed 2.0 Code',
+    description: 'Doubao coding model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'kimi-k2.6',
+    label: 'Kimi K2.6',
+    description: 'Moonshot model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'Qwen3.6-35B-inno',
+    label: 'Qwen3.6 35B Inno',
+    description: 'Qwen model via Innospark',
+    provider: 'Innospark',
+  },
+  {
+    value: 'minimax-m2.5',
+    label: 'MiniMax M2.5',
+    description: 'SiliconFlow fallback model',
+    provider: 'SiliconFlow',
+  },
+]
+
+const navLinks = [
+  { href: '/dashboard', label: '资源生成' },
+  { href: '/ppt-upload', label: '上传 PPT' },
+  { href: '/templates', label: '模板库' },
+  { href: '/public_documents', label: '公开文档' },
+]
+
+function ModelGroup({
+  title,
+  provider,
+  selectedModel,
+  onSelect,
+  selectedClassName,
+}: {
+  title: string
+  provider: ModelOption['provider']
+  selectedModel: AIModel
+  onSelect: (model: AIModel) => void
+  selectedClassName: string
+}) {
+  const groupModels = models.filter((model) => model.provider === provider)
+  if (!groupModels.length) return null
+
+  return (
+    <>
+      <div className="border-b border-t border-gray-200 bg-gray-50 px-4 py-2 text-xs font-semibold text-gray-500 first:border-t-0">
+        {title}
+      </div>
+      {groupModels.map((model) => (
+        <button
+          key={model.value}
+          onClick={() => onSelect(model.value)}
+          className={`w-full px-4 py-3 text-left transition-colors hover:bg-gray-50 ${
+            selectedModel === model.value ? selectedClassName : ''
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-semibold text-gray-900">{model.label}</div>
+              <div className="mt-1 text-xs text-gray-500">{model.description}</div>
+            </div>
+            {selectedModel === model.value && (
+              <svg className="h-5 w-5 shrink-0 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            )}
+          </div>
+        </button>
+      ))}
+    </>
+  )
+}
+
 export default function Navigation({ user, onLogout }: NavigationProps) {
   const pathname = usePathname()
   const { selectedModel, setSelectedModel } = useModelSettings()
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
 
-  const navLinks = [
-    { href: '/dashboard', label: '交互资源生成' },
-    { href: '/ppt-upload', label: '上传PPT' },
-    { href: '/templates', label: '模板库' },
-    { href: '/public_documents', label: '查看公开文档' },
-  ]
+  const selectedLabel = models.find((model) => model.value === selectedModel)?.label || selectedModel
 
-  const isActive = (href: string) => {
-    return pathname === href
+  const handleSelect = (model: AIModel) => {
+    setSelectedModel(model)
+    setIsModelDropdownOpen(false)
   }
-
-  const models: { value: AIModel; label: string; description: string; provider: string }[] = [
-    {
-      value: 'glm-4.7',
-      label: 'GLM-4.7',
-      description: '智谱旗舰，优先使用获得最佳效果',
-      provider: 'Zhipu'
-    },
-    {
-      value: 'claude-opus-4-7',
-      label: 'Claude Opus 4.7',
-      description: '最新旗舰推理模型',
-      provider: 'Anthropic'
-    },
-    {
-      value: 'claude-opus-4-6',
-      label: 'Claude Opus 4.6',
-      description: '最强推理能力，适合复杂任务',
-      provider: 'Anthropic'
-    },
-    {
-      value: 'claude-sonnet-4-6',
-      label: 'Claude Sonnet 4.6',
-      description: '平衡性能与速度',
-      provider: 'Anthropic'
-    },
-    {
-      value: 'gpt-5.4',
-      label: 'GPT-5.4',
-      description: 'OpenAI 旗舰，性价比高',
-      provider: 'OpenAI'
-    },
-    {
-      value: 'gpt-5.5',
-      label: 'GPT-5.5',
-      description: 'OpenAI 最新旗舰',
-      provider: 'OpenAI'
-    },
-    {
-      value: 'deepseek-v4-pro',
-      label: 'DeepSeek V4 Pro',
-      description: 'DeepSeek 旗舰，1M上下文',
-      provider: 'DeepSeek'
-    },
-    {
-      value: 'deepseek-v4-flash',
-      label: 'DeepSeek V4 Flash',
-      description: 'DeepSeek 高速经济之选',
-      provider: 'DeepSeek'
-    },
-    {
-      value: 'gemini-3.1-pro',
-      label: 'Gemini 3.1 Pro',
-      description: 'Google 最强推理模型',
-      provider: 'Google'
-    },
-    {
-      value: 'kimi-k2.6',
-      label: 'Kimi K2.6',
-      description: '月之暗面最新多模态模型',
-      provider: 'Moonshot'
-    },
-    {
-      value: 'minimax-m2.5',
-      label: 'MiniMax M2.5',
-      description: 'MiniMax 最新多模态模型',
-      provider: 'MiniMax'
-    },
-    {
-      value: 'qwen3.6-35b-a3b',
-      label: 'Qwen3.6 35B A3B',
-      description: '通义千问最新旗舰模型',
-      provider: 'Qwen'
-    },
-  ]
 
   return (
     <div className="bg-white shadow">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center py-4">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between py-4">
           <div className="flex items-center space-x-8">
-            <h1 className="text-2xl font-bold text-gray-900">
-              MAIC-UI
-            </h1>
+            <h1 className="text-2xl font-bold text-gray-900">MAIC-UI</h1>
             <nav className="flex space-x-4">
               {navLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive(link.href)
+                  className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                    pathname === link.href
                       ? 'bg-blue-100 text-blue-700'
                       : 'text-gray-700 hover:bg-gray-100'
                   }`}
@@ -128,19 +200,17 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
               ))}
             </nav>
           </div>
+
           <div className="flex items-center space-x-4">
-            {/* Model Selector */}
             <div className="relative">
               <button
                 onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
-                className="flex items-center space-x-2 px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                className="flex items-center space-x-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
               >
-                <span>AI模型:</span>
-                <span className="text-blue-600 font-semibold">
-                  {models.find(m => m.value === selectedModel)?.label || selectedModel}
-                </span>
+                <span>AI 模型:</span>
+                <span className="font-semibold text-blue-600">{selectedLabel}</span>
                 <svg
-                  className={`w-4 h-4 transition-transform ${isModelDropdownOpen ? 'rotate-180' : ''}`}
+                  className={`h-4 w-4 transition-transform ${isModelDropdownOpen ? 'rotate-180' : ''}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -150,92 +220,29 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
               </button>
 
               {isModelDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-300 rounded-md shadow-lg z-50">
+                <div className="absolute right-0 z-50 mt-2 max-h-[70vh] w-80 overflow-y-auto rounded-md border border-gray-300 bg-white shadow-lg">
                   <div className="py-1">
-                    {/* Zhipu Models */}
-                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-50 border-b border-gray-200">
-                      Zhipu AI (智谱)
-                    </div>
-                    {models.filter(m => m.provider === 'Zhipu').map((model) => (
-                      <button
-                        key={model.value}
-                        onClick={() => {
-                          setSelectedModel(model.value)
-                          setIsModelDropdownOpen(false)
-                        }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
-                          selectedModel === model.value ? 'bg-blue-50 border-l-4 border-blue-600' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-semibold text-gray-900">{model.label}</div>
-                            <div className="text-xs text-gray-500 mt-1">{model.description}</div>
-                          </div>
-                          {selectedModel === model.value && (
-                            <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                    {/* Anthropic Models */}
-                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-50 border-b border-t border-gray-200">
-                      Anthropic (Claude)
-                    </div>
-                    {models.filter(m => m.provider === 'Anthropic').map((model) => (
-                      <button
-                        key={model.value}
-                        onClick={() => {
-                          setSelectedModel(model.value)
-                          setIsModelDropdownOpen(false)
-                        }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
-                          selectedModel === model.value ? 'bg-purple-50 border-l-4 border-purple-600' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-semibold text-gray-900">{model.label}</div>
-                            <div className="text-xs text-gray-500 mt-1">{model.description}</div>
-                          </div>
-                          {selectedModel === model.value && (
-                            <svg className="w-5 h-5 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                    {/* Other Models (via Transfer Station) */}
-                    <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-50 border-b border-t border-gray-200">
-                      其他模型 (中转站)
-                    </div>
-                    {models.filter(m => !['Zhipu', 'Anthropic'].includes(m.provider)).map((model) => (
-                      <button
-                        key={model.value}
-                        onClick={() => {
-                          setSelectedModel(model.value)
-                          setIsModelDropdownOpen(false)
-                        }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors ${
-                          selectedModel === model.value ? 'bg-green-50 border-l-4 border-green-600' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-semibold text-gray-900">{model.label}</div>
-                            <div className="text-xs text-gray-500 mt-1">{model.description}</div>
-                          </div>
-                          {selectedModel === model.value && (
-                            <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                            </svg>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+                    <ModelGroup
+                      title="Zhipu AI"
+                      provider="Zhipu"
+                      selectedModel={selectedModel}
+                      onSelect={handleSelect}
+                      selectedClassName="border-l-4 border-blue-600 bg-blue-50"
+                    />
+                    <ModelGroup
+                      title="Innospark"
+                      provider="Innospark"
+                      selectedModel={selectedModel}
+                      onSelect={handleSelect}
+                      selectedClassName="border-l-4 border-purple-600 bg-purple-50"
+                    />
+                    <ModelGroup
+                      title="SiliconFlow"
+                      provider="SiliconFlow"
+                      selectedModel={selectedModel}
+                      onSelect={handleSelect}
+                      selectedClassName="border-l-4 border-green-600 bg-green-50"
+                    />
                   </div>
                 </div>
               )}
@@ -243,13 +250,13 @@ export default function Navigation({ user, onLogout }: NavigationProps) {
 
             {user && (
               <span className="text-sm text-gray-600">
-                欢迎，{user.full_name || user.username}！
+                欢迎，{user.full_name || user.username}
               </span>
             )}
             {onLogout && (
               <button
                 onClick={onLogout}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
               >
                 退出登录
               </button>

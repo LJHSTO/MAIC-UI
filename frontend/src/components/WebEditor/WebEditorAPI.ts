@@ -1,5 +1,5 @@
-import Cookies from 'js-cookie'
 import { WebEditRequest, WebEditResponse, WebEditStatusResponse, CitationListItem, ModelType } from './types'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api')
 
@@ -29,7 +29,7 @@ export class WebEditorAPI {
 	private getHeaders(includeAuth = false): Record<string, string> {
 		const headers: Record<string, string> = {}
 		if (includeAuth && !this.isPublic) {
-			const token = Cookies.get('access_token')
+			const token = getStoredAuthToken()
 			if (token) {
 				headers['Authorization'] = `Bearer ${token}`
 			}
@@ -326,7 +326,7 @@ export function startStatusPolling(options: StatusPollingOptions): (() => void) 
 	// EventSource cannot send headers; pass JWT as query param for private routes
 	let streamUrl = `${API_BASE_URL}${streamPath}`
 	if (!isPublic) {
-		const token = Cookies.get('access_token')
+		const token = getStoredAuthToken()
 		if (token) {
 			streamUrl += `?token=${encodeURIComponent(token)}`
 		}
@@ -415,7 +415,7 @@ function _startPollingFallback(options: StatusPollingOptions): (() => void) | nu
 		try {
 			const headers: Record<string, string> = {}
 			if (!isPublic) {
-				const token = Cookies.get('access_token')
+				const token = getStoredAuthToken()
 				if (token) headers['Authorization'] = `Bearer ${token}`
 			}
 

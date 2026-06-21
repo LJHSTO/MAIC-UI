@@ -6,7 +6,7 @@ import PPTUploadForm from '@/components/ppt-viewer/PPTUploadForm';
 import Navigation from '@/components/Navigation';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { QRCodeHover } from '@/components/QRCodeHover';
-import Cookies from 'js-cookie';
+import { getStoredAuthToken } from '@/lib/auth-token';
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
 interface PPTDocument {
@@ -43,9 +43,7 @@ export default function PPTUploadPage() {
     router.push('/login');
   };
 
-  const getAuthToken = () => {
-    return Cookies.get('access_token');
-  };
+  const getAuthToken = () => getStoredAuthToken();
 
   const fetchDocuments = async () => {
     try {

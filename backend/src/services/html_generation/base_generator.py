@@ -16,6 +16,14 @@ import re
 logger = logging.getLogger(__name__)
 
 
+class FatalAIProviderError(RuntimeError):
+    """Provider error that should not be retried in the current generation run."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 class BaseGenerator(ABC):
     """
     Abstract base class for HTML generators.
@@ -38,6 +46,7 @@ class BaseGenerator(ABC):
             "refinements": {},
             "errors": []
         }
+        self._last_provider_failure_reason = None
 
     @abstractmethod
     async def generate(self, pdf_images: List[Dict], analysis: Dict,
@@ -170,6 +179,51 @@ class BaseGenerator(ABC):
         logger.error(f"❌ Error in {stage}: {str(error)}")
         self._update_generation_info(stage, error=str(error))
 
+    def _classify_fatal_provider_error(self, error: Exception) -> Optional[str]:
+        """Return a user-facing reason for upstream errors where retries waste time."""
+        response = getattr(error, "response", None)
+        status_code = (
+            getattr(error, "status_code", None)
+            or getattr(response, "status_code", None)
+        )
+        error_text = str(error)
+        if response is not None:
+            try:
+                error_text += f" {response.text}"
+            except Exception:
+                pass
+
+        lowered = error_text.lower()
+
+        if status_code == 413 or "request entity too large" in lowered:
+            return "远端接口返回 413，请求体过大。通常是一次发送的 PDF 页面图片或文本太多。"
+
+        quota_markers = [
+            "remainquota",
+            "insufficient quota",
+            "quota exceeded",
+            "billing",
+            "balance",
+            "余额",
+            "额度",
+        ]
+        if status_code in (401, 403) or "unauthorized" in lowered:
+            if any(marker in lowered for marker in quota_markers):
+                return "远端接口返回 401/403，API key 额度不足或已用尽。"
+            return "远端接口返回 401/403，API key 无效、过期或没有该模型权限。"
+
+        if status_code == 429 or "rate limit" in lowered or "too many requests" in lowered:
+            return "远端接口返回 429，请求过于频繁或触发限流。"
+
+        return None
+
+    def _remember_provider_failure(self, reason: str) -> None:
+        self._last_provider_failure_reason = reason
+        self.generation_metadata["errors"].append({
+            "stage": "ai_provider",
+            "error": reason
+        })
+
     def _sanitize_html_output(self, raw_response: str) -> str:
         """Remove markdown fences and surrounding noise from model HTML output."""
         if not raw_response:
@@ -180,3 +234,21 @@ class BaseGenerator(ABC):
         text = re.sub(r"\n?\s*```\s*$", "", text)
         text = text.replace("```html", "").replace("```HTML", "").replace("```", "")
         return text.strip()
+
+    def _validate_complete_html_or_raise(self, html: str) -> None:
+        """Reject truncated HTML that would render as a blank or broken page."""
+        lowered = (html or "").lower()
+        required_markers = ("<html", "<body", "</body>", "</html>")
+        missing = [marker for marker in required_markers if marker not in lowered]
+        if missing:
+            raise FatalAIProviderError(
+                "incomplete_html_output: missing " + ", ".join(missing)
+            )
+
+        for tag in ("style", "script"):
+            opens = len(re.findall(rf"<{tag}\b", lowered))
+            closes = lowered.count(f"</{tag}>")
+            if opens != closes:
+                raise FatalAIProviderError(
+                    f"incomplete_html_output: unclosed <{tag}> block"
+                )

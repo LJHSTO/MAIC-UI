@@ -25,7 +25,14 @@ from ..models.ppt_document import PPTDocument
 from ..models.document import MAX_VERSION_HISTORY
 from ..models.user import User
 from ..services.ppt_processor import process_ppt_background
-from ..services.ai_processor import AIProcessor
+from ..services.ai_processor import (
+    AIProcessor,
+    get_innospark_api_key,
+    get_innospark_base_url,
+    is_innospark_model,
+    resolve_innospark_model,
+)
+from ..services.generation_metadata import build_generation_metadata, get_generation_metadata
 from ..core.security import get_current_user
 
 # Configure logging
@@ -33,12 +40,20 @@ logger = logging.getLogger(__name__)
 
 # Model to provider mapping (same as pdf_processing.py)
 CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-                  "glm-4.7", "glm-4.6v",
-                  "gpt-5.4", "gpt-5.5",
-                  "deepseek-v4-pro", "deepseek-v4-flash",
-                  "gemini-3.1-pro",
+                  "glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1",
+                  "gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5",
+                  "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+                  "gemini-3.1-pro", "gemini-3.1-pro-preview",
+                  "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+                  "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215",
                   "kimi-k2.6",
-                  "minimax-m2.5", "qwen3.6-35b-a3b"]
+                  "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b", "Qwen3.6-35B-inno"]
+ZHIPU_MODELS = {"glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1"}
+TRANSFER_MODELS = {
+    "minimax-m2.5",
+    "qwen3.6-27b",
+    "qwen3.6-35b-a3b",
+}
 
 
 def get_provider_for_model(model: str) -> str:
@@ -93,21 +108,25 @@ def get_ai_processor(generation_mode: str = "fast", ai_model: Optional[str] = No
         }
     elif provider_type == 'chinese':
         # Unified Chinese provider - auto-detect backend from model name
-        if ai_model and ai_model.startswith('claude-'):
+        if ai_model and is_innospark_model(ai_model):
+            model = resolve_innospark_model(ai_model)
+            api_key = get_innospark_api_key()
+            base_url = get_innospark_base_url()
+        elif ai_model and ai_model.startswith('claude-'):
             # Anthropic model via transfer station
             model = ai_model
             api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
             transfer_url = os.getenv('TRANSFER_BASE_URL', '')
             base_url = transfer_url.replace('/v1', '') if transfer_url else os.getenv('ANTHROPIC_BASE_URL')
-        elif ai_model and ai_model in ["gpt-5.4", "gpt-5.5",
-                                        "deepseek-v4-pro", "deepseek-v4-flash",
-                                        "gemini-3.1-pro",
-                                        "kimi-k2.6",
-                                        "minimax-m2.5", "qwen3.6-35b-a3b"]:
+        elif ai_model and ai_model in TRANSFER_MODELS:
             # OpenAI-compatible model via transfer station
             model = ai_model
             api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('OPENAI_API_KEY')
             base_url = os.getenv('TRANSFER_BASE_URL')
+        elif ai_model and ai_model in ZHIPU_MODELS:
+            model = ai_model
+            api_key = os.getenv('ZHIPU_API_KEY') or os.getenv('TRANSFER_API_KEY')
+            base_url = None
         else:
             # Default: use transfer station for all models
             model = ai_model or os.getenv('TRANSFER_MODEL', 'glm-4.7')
@@ -133,6 +152,22 @@ router = APIRouter()
 # Ensure uploads directory exists
 UPLOAD_DIR = Path("uploads/ppt")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_ppt_generation_metadata(document: PPTDocument) -> Optional[Dict[str, Any]]:
+    return get_generation_metadata(
+        document.processing_config,
+        document.analysis_results,
+        document.slides_data
+    )
+
+
+def attach_ppt_generation_metadata(response_data: Dict[str, Any], document: PPTDocument) -> Dict[str, Any]:
+    generation_metadata = get_ppt_generation_metadata(document)
+    response_data["generation_metadata"] = generation_metadata
+    response_data["ai_model"] = generation_metadata.get("model") if generation_metadata else None
+    response_data["ai_provider"] = generation_metadata.get("provider") if generation_metadata else None
+    return response_data
 
 
 def get_slide_count(file_path: str, file_type: str) -> int:
@@ -350,7 +385,8 @@ async def configure_ppt_processing(
                   Provider is auto-detected from model name.
                   - Anthropic models: claude-sonnet-4-6, claude-opus-4-6
                   - Zhipu models: glm-4.7, glm-4.6v
-                  - Transfer station: gpt-5.4, gpt-5.5, deepseek-v4-pro, gemini-3.1-pro, kimi-k2.6, minimax-m2.5, qwen3.6-35b-a3b
+                  - Innospark: gpt-5.4-pro, gpt-5.4, claude-opus-4-6, claude-sonnet-4-6, deepseek-v4-pro, gemini-3.1-pro-preview, kimi-k2.6, Qwen3.6-35B-inno
+                  - SiliconFlow fallback: minimax-m2.5
     """
     try:
         # Get document
@@ -470,7 +506,7 @@ async def get_ppt_documents(
         ).order_by(PPTDocument.created_at.desc()).offset(skip).limit(limit).all()
 
         return [
-            {
+            attach_ppt_generation_metadata({
                 "id": doc.id,
                 "title": doc.title,
                 "original_filename": doc.original_filename,
@@ -484,7 +520,7 @@ async def get_ppt_documents(
                 "root_document_id": doc.root_document_id,
                 "version_number": doc.version_number,
                 "is_current": doc.is_current
-            }
+            }, doc)
             for doc in documents
         ]
 
@@ -536,6 +572,8 @@ async def get_ppt_document(
         if document.error_message:
             result["error_message"] = document.error_message
 
+        attach_ppt_generation_metadata(result, document)
+
         return result
 
     except HTTPException:
@@ -570,11 +608,11 @@ async def get_ppt_slides(
                 "message": "Slides not yet processed"
             }
 
-        return {
+        return attach_ppt_generation_metadata({
             "document_id": document_id,
             "title": document.title,
             "slides": document.slides_data.get("slides", [])
-        }
+        }, document)
 
     except HTTPException:
         raise
@@ -722,7 +760,7 @@ async def get_interactive_view(
                         "description": slide.get("description", "")
                     })
 
-        return {
+        return attach_ppt_generation_metadata({
             "document_id": document_id,
             "title": document.title,
             "subject": document.subject,
@@ -730,7 +768,7 @@ async def get_interactive_view(
             "is_public": bool(document.is_public),
             "total_items": len(interactive_items),
             "items": interactive_items
-        }
+        }, document)
 
     except HTTPException:
         raise
@@ -783,8 +821,10 @@ async def get_ppt_status(
             "progress": progress,
             "message": message,
             "slide_count": document.slide_count,
-            "is_public": bool(document.is_public)
+            "is_public": bool(document.is_public),
+            "processing_config": document.processing_config or {}
         }
+        attach_ppt_generation_metadata(response_data, document)
 
         # Include template options if awaiting selection
         if document.status == "awaiting_template_selection" and document.template_options:
@@ -914,6 +954,20 @@ async def _generate_demos_with_templates(
             ai_processor.provider.text_model = selected_model
             logger.info(f"🔄 Set Zhipu text model: {ai_processor.provider.text_model}")
 
+        generation_metadata = build_generation_metadata(
+            ai_processor,
+            requested_model=selected_model,
+            workflow_type="ppt",
+            generation_method="template_based"
+        )
+        processing_config = {
+            **processing_config,
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
+        document.processing_config = processing_config
+
         demo_analyzer = PPTDemoAnalyzer(ai_processor, db_session_factory)
 
         # Build user preferences
@@ -994,10 +1048,22 @@ async def _generate_demos_with_templates(
         logger.info(f"=" * 80)
 
         # Create a new dict to ensure SQLAlchemy detects the change
-        new_slides_data = {"slides": slides_data}
+        new_slides_data = {
+            **(document.slides_data or {}),
+            "slides": slides_data,
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
 
         logger.info(f"Setting document.slides_data...")
         document.slides_data = new_slides_data
+        document.analysis_results = {
+            **(document.analysis_results or {}),
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
         document.status = "ready"
         document.template_options = None  # Clear template options after use
 
@@ -1052,7 +1118,7 @@ async def get_public_ppt_documents(
         ).order_by(PPTDocument.created_at.desc()).offset(skip).limit(limit).all()
 
         return [
-            {
+            attach_ppt_generation_metadata({
                 "id": doc.id,
                 "title": doc.title,
                 "original_filename": doc.original_filename,
@@ -1066,7 +1132,7 @@ async def get_public_ppt_documents(
                 "root_document_id": doc.root_document_id,
                 "version_number": doc.version_number,
                 "is_current": doc.is_current
-            }
+            }, doc)
             for doc in documents
         ]
 
@@ -1112,6 +1178,8 @@ async def get_public_ppt_document(
         if document.analysis_results:
             result["analysis"] = document.analysis_results
 
+        attach_ppt_generation_metadata(result, document)
+
         return result
 
     except HTTPException:
@@ -1145,14 +1213,15 @@ async def get_public_ppt_status(
         if document.error_message:
             message = f"Error: {document.error_message}"
 
-        return {
+        return attach_ppt_generation_metadata({
             "document_id": document.id,
             "status": document.status,
             "progress": progress,
             "message": message,
             "slide_count": document.slide_count,
-            "is_public": True
-        }
+            "is_public": True,
+            "processing_config": document.processing_config or {}
+        }, document)
 
     except HTTPException:
         raise
@@ -1295,7 +1364,7 @@ async def get_public_interactive_view(
                         "description": slide.get("description", "")
                     })
 
-        return {
+        return attach_ppt_generation_metadata({
             "document_id": document_id,
             "title": document.title,
             "subject": document.subject,
@@ -1303,7 +1372,7 @@ async def get_public_interactive_view(
             "is_public": True,
             "total_items": len(interactive_items),
             "items": interactive_items
-        }
+        }, document)
 
     except HTTPException:
         raise

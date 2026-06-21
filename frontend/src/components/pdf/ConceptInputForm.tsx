@@ -1,10 +1,10 @@
 'use client'
 
 import React, { useState } from 'react'
-import Cookies from 'js-cookie'
 import { Button } from '@/components/ui/Button'
 import { useModelSettings } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage } from '@/components/providers/LanguageProvider'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -60,7 +60,7 @@ export function ConceptInputForm() {
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const getAuthToken = () => Cookies.get('access_token')
+  const getAuthToken = () => getStoredAuthToken()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

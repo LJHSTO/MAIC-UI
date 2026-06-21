@@ -45,7 +45,13 @@ except ImportError:
 
 
 # Import Gemini client adapter
-from .ai_processor import GeminiClient
+from .ai_processor import (
+    GeminiClient,
+    get_innospark_api_key,
+    get_innospark_base_url,
+    is_innospark_model,
+    resolve_innospark_model,
+)
 
 
 class ChineseEditorProvider:
@@ -53,41 +59,51 @@ class ChineseEditorProvider:
 
     # Model detection
     ANTHROPIC_MODELS = []  # Claude now goes through uuapi (openai_compat), not Anthropic SDK
-    ZHIPU_MODELS = ["glm-4.7"]
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6", "glm-5", "glm-5.1"]
     OPENAI_COMPAT_MODELS = [
-        # Claude (via uuapi)
+        # Claude (via Innospark)
         "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-        # OpenAI GPT (via uuapi)
-        "gpt-5.4", "gpt-5.5",
+        # OpenAI GPT (via Innospark)
+        "gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5",
         # DeepSeek
-        "deepseek-v4-pro", "deepseek-v4-flash",
-        # Gemini (via uuapi)
-        "gemini-3.1-pro",
+        "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+        # Gemini (via Innospark)
+        "gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
+        "gemini-2.5-pro", "gemini-2.5-flash",
+        # Doubao
+        "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215",
         # Kimi
         "kimi-k2.6",
         # GLM (via Zhipu OpenAI-compatible API)
-        "glm-4.7",
+        "glm-4.7", "glm-4.6", "glm-5", "glm-5.1",
         # Others (via SiliconFlow)
-        "minimax-m2.5", "qwen3.6-35b-a3b",
+        "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b", "Qwen3.6-35B-inno",
     ]
 
     # Internal name → SiliconFlow API model ID mapping
     SILICONFLOW_MODEL_MAP = {
         "minimax-m2.5": "MiniMaxAI/MiniMax-M2.5",
+        "qwen3.6-27b": "Qwen/Qwen3.6-27B",
         "qwen3.6-35b-a3b": "Qwen/Qwen3.6-35B-A3B",
     }
 
     # Model categories for routing to different API proxies
     CLAUDE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
-    GPT_MODELS = ["gpt-5.4", "gpt-5.5"]
-    GEMINI_MODELS = ["gemini-3.1-pro"]
-    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"]
-    ZHIPU_MODELS = ["glm-4.7"]
+    GPT_MODELS = ["gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5"]
+    GEMINI_MODELS = [
+        "gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
+        "gemini-2.5-pro", "gemini-2.5-flash",
+    ]
+    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2"]
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6", "glm-5", "glm-5.1"]
     KIMI_MODELS = ["kimi-k2.6"]
+    DOUBAO_MODELS = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215"]
 
     def _resolve_model(self, model: str) -> str:
         """Resolve internal model name to actual API model ID."""
         if self.backend == "openai_compat":
+            if is_innospark_model(model):
+                return resolve_innospark_model(model)
             # GLM pass through (Zhipu OpenAI-compatible API)
             if model in self.ZHIPU_MODELS:
                 return model
@@ -116,9 +132,11 @@ class ChineseEditorProvider:
     # Internal name → Google Gemini API model ID mapping
     GEMINI_MODEL_MAP = {
         "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
         "gemini-3.5-flash": "gemini-3.5-flash",
         "gemini-3-flash-preview": "gemini-3-flash-preview",
         "gemini-2.5-pro": "gemini-2.5-pro",
+        "gemini-2.5-flash": "gemini-2.5-flash",
     }
 
     # Internal name → uuapi Gemini model ID mapping
@@ -130,12 +148,15 @@ class ChineseEditorProvider:
     DEEPSEEK_MODEL_MAP = {
         "deepseek-v4-pro": "deepseek-reasoner",
         "deepseek-v4-flash": "deepseek-chat",
+        "deepseek-v3.2": "deepseek-v3.2",
     }
 
     def _get_client_for_model(self, model: str):
         """Get the appropriate OpenAI client based on model category."""
         if self.backend != "openai_compat":
             return self.openai_client
+        if is_innospark_model(model) and self.innospark_client is not None:
+            return self.innospark_client
         if model in self.CLAUDE_MODELS and self.claude_client is not None:
             return self.claude_client
         if model in self.GPT_MODELS and self.gpt_client is not None:
@@ -172,13 +193,18 @@ class ChineseEditorProvider:
             if self.backend == "anthropic":
                 api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
             elif self.backend == "openai_compat":
-                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
+                if is_innospark_model(model):
+                    api_key = get_innospark_api_key()
+                elif model in self.ZHIPU_MODELS:
+                    api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
+                else:
+                    api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
             else:
                 api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
 
         if not api_key:
             env_var_map = {"anthropic": "TRANSFER_API_KEY", "openai_compat": "TRANSFER_API_KEY", "zhipu": "ZHIPU_API_KEY"}
-            env_var = env_var_map.get(self.backend, "TRANSFER_API_KEY")
+            env_var = "INNOSPARK_API_KEY" if is_innospark_model(model) else env_var_map.get(self.backend, "TRANSFER_API_KEY")
             raise ValueError(f"API key not provided. Set {env_var} environment variable or pass api_key parameter.")
 
         # Initialize appropriate client
@@ -206,15 +232,24 @@ class ChineseEditorProvider:
             self.deepseek_client = None
             self.gemini_client = None
             self.kimi_client = None
+            self.innospark_client = None
             logger.info(f"🎨 ChineseEditorProvider initialized with Anthropic backend, model: {self.model}")
 
         elif self.backend == "openai_compat":
             if not OPENAI_SDK_AVAILABLE:
                 raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
 
-            # Main client: SiliconFlow
+            # Main fallback client: SiliconFlow
             compat_base_url = base_url or os.getenv("TRANSFER_BASE_URL", "https://api.siliconflow.cn/v1")
             self.openai_client = OpenAIClient(api_key=api_key, base_url=compat_base_url)
+            innospark_key = api_key if is_innospark_model(model) else get_innospark_api_key()
+            innospark_url = base_url if is_innospark_model(model) and base_url else get_innospark_base_url()
+            if innospark_key:
+                self.innospark_client = OpenAIClient(api_key=innospark_key, base_url=innospark_url)
+                logger.info(f"🎨 Innospark editor client initialized: {innospark_url}")
+            else:
+                self.innospark_client = None
+
             self.anthropic_client = None
             self.zhipu_client = None
 
@@ -295,6 +330,7 @@ class ChineseEditorProvider:
             self.deepseek_client = None
             self.gemini_client = None
             self.kimi_client = None
+            self.innospark_client = None
             logger.info(f"🎨 ChineseEditorProvider initialized with Zhipu backend, model: {self.model}")
 
     def _detect_backend(self, model: str) -> str:
@@ -456,7 +492,7 @@ class ChineseEditorProvider:
     async def _run_openai_compat_call(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None) -> Any:
         """Run OpenAI-compatible API call via appropriate transfer station.
 
-        Routes to: SiliconFlow (DeepSeek/GLM/Kimi/MiniMax/Qwen) or uuapi (GPT/Gemini).
+        Routes to Innospark when available, otherwise provider-specific OpenAI-compatible clients.
         """
         if self.openai_client is None:
             raise RuntimeError("OpenAI-compat client not initialized.")
@@ -595,6 +631,24 @@ class ChineseEditorProvider:
         """Get the name of the AI provider."""
         if self.backend == "anthropic":
             return f"ChineseEditorProvider-Anthropic ({self.model})"
+        if self.backend == "openai_compat":
+            if is_innospark_model(self.model):
+                return f"Innospark ({resolve_innospark_model(self.model)})"
+            if self.model in self.GPT_MODELS:
+                return "UUAPI GPT (OpenAI-compatible)"
+            if self.model in self.CLAUDE_MODELS:
+                return "UUAPI Claude (OpenAI-compatible)"
+            if self.model in self.GEMINI_MODELS:
+                return "UUAPI Gemini (OpenAI-compatible)"
+            if self.model in self.DEEPSEEK_MODELS:
+                return "DeepSeek official (OpenAI-compatible)"
+            if self.model in self.KIMI_MODELS:
+                return "Moonshot Kimi (OpenAI-compatible)"
+            if self.model in self.ZHIPU_MODELS:
+                return "Zhipu GLM (OpenAI-compatible)"
+            if self.model.startswith("minimax-") or self.model.startswith("qwen"):
+                return "SiliconFlow (OpenAI-compatible)"
+            return "OpenAI-compatible transfer"
         return f"ChineseEditorProvider-Zhipu ({self.model})"
 
 
@@ -695,12 +749,14 @@ _editor_processor_instance = None
 
 # Model to provider mapping
 CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-                  "glm-4.7",
+                  "glm-4.7", "glm-4.6", "glm-5", "glm-5.1",
                   "gpt-5.4", "gpt-5.5",
-                  "deepseek-v4-pro", "deepseek-v4-flash",
-                  "gemini-3.1-pro",
+                  "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+                  "gemini-3.1-pro", "gemini-3.1-pro-preview",
+                  "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+                  "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215",
                   "kimi-k2.6",
-                  "minimax-m2.5", "qwen3.6-35b-a3b"]
+                  "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b"]
 
 
 def get_editor_processor(
@@ -715,8 +771,8 @@ def get_editor_processor(
 
     Supported models (all use unified ChineseEditorProvider with auto-detected backend):
     - Anthropic backend: claude-sonnet-4-6, claude-opus-4-6
-    - Zhipu backend: glm-4.7
-    - Transfer station: gpt-5.4, gpt-5.5, deepseek-v4-pro, gemini-3.1-pro, kimi-k2.6, minimax-m2.5, qwen3.6-35b-a3b
+    - Zhipu backend: glm-4.7, glm-4.6, glm-5, glm-5.1
+    - Transfer station: gpt-5.4, gpt-5.5, deepseek-v4-pro, gemini-3.1-pro, kimi-k2.6, minimax-m2.5, qwen3.6-27b, qwen3.6-35b-a3b
 
     Environment variables:
     - EDITOR_PROVIDER: Provider type - "chinese" (default: chinese)
@@ -777,7 +833,23 @@ def _create_editor_processor(
     final_model = model or os.getenv("EDITOR_MODEL", "glm-4.7")
 
     # Determine API key based on model name (auto-detect backend)
-    if final_model.startswith("claude-") or final_model in ["claude-sonnet-4-6", "claude-opus-4-6"]:
+    if is_innospark_model(final_model):
+        api_key = get_innospark_api_key()
+        if not api_key:
+            raise ValueError(
+                "INNOSPARK_API_KEY environment variable is not configured. "
+                "Please set INNOSPARK_API_KEY to use Innospark models."
+            )
+        base_url = get_innospark_base_url()
+    elif final_model in ChineseEditorProvider.ZHIPU_MODELS:
+        api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "ZHIPU_API_KEY environment variable is not configured. "
+                "Please set ZHIPU_API_KEY to use Zhipu models."
+            )
+        base_url = None
+    elif final_model.startswith("claude-") or final_model in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError(

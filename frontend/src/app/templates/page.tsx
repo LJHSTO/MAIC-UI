@@ -1,12 +1,12 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import Cookies from 'js-cookie'
 import { useRouter } from 'next/navigation'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { useModelSettings, AIModel } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage, Language } from '@/components/providers/LanguageProvider'
 import TemplateBrowser from '@/components/templates/TemplateBrowser'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -35,21 +35,31 @@ export default function TemplatesPage() {
   const models: { value: AIModel; label: string; description: string }[] = [
     { value: 'glm-4.7', label: 'GLM-4.7', description: t('model.glm47_desc') },
     { value: 'glm-4.6', label: 'GLM-4.6', description: t('model.glm46_desc') },
-    { value: 'gpt-5', label: 'GPT-5', description: t('model.gpt5_desc') },
-    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: t('model.deepseek_v4_flash_desc') },
-    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', description: t('model.gemini_flash_desc') },
-    { value: 'kimi-k2.6', label: 'Kimi K2.6', description: t('model.kimi_k26_desc') },
+    { value: 'glm-5', label: 'GLM-5', description: t('model.glm5_desc') },
     { value: 'glm-5.1', label: 'GLM-5.1', description: t('model.glm51_desc') },
+    { value: 'gpt-5.4', label: 'GPT-5.4', description: t('model.gpt54_desc') },
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6', description: t('model.opus46_desc') },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', description: t('model.sonnet46_desc') },
+    { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: t('model.deepseek_v4_pro_desc') },
+    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash', description: t('model.deepseek_v4_flash_desc') },
+    { value: 'deepseek-v3.2', label: 'DeepSeek V3.2', description: t('model.deepseek_v32_desc') },
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', description: t('model.gemini_pro_desc') },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', description: t('model.gemini_flash_desc') },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: t('model.gemini25_pro_desc') },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: t('model.gemini25_flash_desc') },
+    { value: 'doubao-seed-2-0-pro-260215', label: 'Doubao Seed 2.0 Pro', description: t('model.doubao_seed20_pro_desc') },
+    { value: 'doubao-seed-2-0-code-preview-260215', label: 'Doubao Seed 2.0 Code', description: t('model.doubao_seed20_code_desc') },
+    { value: 'kimi-k2.6', label: 'Kimi K2.6', description: t('model.kimi_k26_desc') },
     { value: 'minimax-m2.5', label: 'MiniMax M2.5', description: t('model.minimax_m25_desc') },
-    { value: 'qwen3.6-35b-a3b', label: 'Qwen3.6 35B A3B', description: t('model.qwen36_35b_a3b_desc') },
+    { value: 'Qwen3.6-35B-inno', label: 'Qwen3.6 35B Inno', description: 'Qwen model via Innospark' },
   ]
 
   useEffect(() => {
     const fetchDocuments = async () => {
       try {
-        const token = Cookies.get('access_token')
+        const token = getStoredAuthToken()
         if (!token) return
-        const response = await fetch(`${API_BASE_URL}/pdf/documents?limit=100`, {
+        const response = await fetch(`${API_BASE_URL}/pdf/documents?limit=0`, {
           headers: { Authorization: `Bearer ${token}` }
         })
         if (!response.ok) return

@@ -15,7 +15,7 @@ import time
 import logging
 from typing import Dict, List, Optional, Any
 
-from .base_generator import BaseGenerator
+from .base_generator import BaseGenerator, FatalAIProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,12 @@ class FastGenerator(BaseGenerator):
             self.log_generation_complete(generation_time)
             return result
 
+        except FatalAIProviderError as e:
+            self._remember_provider_failure(e.reason)
+            logger.warning(f"⚠️ Fast generation stopped early: {e.reason}")
+            generation_time = time.time() - generation_start
+            logger.warning(f"⚠️ Fast generation failed, using fallback ({generation_time:.2f}s)")
+            return self._generate_fallback(pdf_images, analysis, user_preferences)
         except Exception as e:
             self.log_error("fast_generation", e)
             generation_time = time.time() - generation_start
@@ -389,6 +395,11 @@ class FastGenerator(BaseGenerator):
                 return None
 
         except Exception as e:
+            fatal_reason = self._classify_fatal_provider_error(e)
+            if fatal_reason:
+                logger.error(f"❌ AI provider fatal failure: {fatal_reason}")
+                raise FatalAIProviderError(fatal_reason) from e
+
             logger.error(f"❌ AI provider call failed: {e}")
 
         return None
@@ -413,12 +424,17 @@ class FastGenerator(BaseGenerator):
         html_end = html_end_index + len('</html>') if html_end_index != -1 else -1
 
         if html_start != -1 and html_end > html_start:
-            return cleaned[html_start:html_end]
+            html = cleaned[html_start:html_end]
+            self._validate_complete_html_or_raise(html)
+            return html
 
         if html_start != -1:
-            return cleaned[html_start:]
+            html = cleaned[html_start:]
+            self._validate_complete_html_or_raise(html)
+            return html
 
         # If no HTML tags found, return full response
+        self._validate_complete_html_or_raise(cleaned)
         return cleaned
 
     def _extract_json_from_response(self, response: str) -> Dict:
@@ -579,6 +595,7 @@ class FastGenerator(BaseGenerator):
             "generation_info": {
                 "mode": "fast",
                 "fallback_used": True,
+                "fallback_reason": self._last_provider_failure_reason,
                 "stages_completed": 0,
                 "refinements": {}
             }

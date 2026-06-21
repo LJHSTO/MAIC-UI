@@ -17,16 +17,18 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from abc import ABC, abstractmethod
 
+from .generation_metadata import build_generation_metadata
+
 logger = logging.getLogger(__name__)
 
 # Model to provider mapping
 CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
                   "glm-4.7", "glm-4.6v",
-                  "gpt-5.4", "gpt-5.5",
+                  "gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5",
                   "deepseek-v4-pro", "deepseek-v4-flash",
-                  "gemini-3.1-pro",
+                  "gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
                   "kimi-k2.6",
-                  "minimax-m2.5", "qwen3.6-35b-a3b"]
+                  "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b", "Qwen3.6-35B-inno"]
 
 
 def get_provider_for_model(model: str) -> str:
@@ -1197,6 +1199,20 @@ async def process_ppt_background(
             ai_processor.provider.text_model = selected_model
             logger.info(f"🔄 Set AI Model: {selected_model}")
 
+        generation_metadata = build_generation_metadata(
+            ai_processor,
+            requested_model=selected_model,
+            workflow_type="ppt",
+            generation_method="template_based" if use_templates else "ai"
+        )
+        processing_config = {
+            **processing_config,
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
+        document.processing_config = processing_config
+
         processor = PPTProcessor(ai_provider=ai_processor, db_session_factory=db_session_factory)
 
         # Convert file to slide images
@@ -1257,8 +1273,18 @@ async def process_ppt_background(
 
         # Update document with slide data
         document.slide_count = len(slide_paths)
-        document.slides_data = {"slides": slides_data}
-        document.analysis_results = analysis
+        document.slides_data = {
+            "slides": slides_data,
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
+        document.analysis_results = {
+            **(analysis or {}),
+            "generation_metadata": generation_metadata,
+            "ai_model": generation_metadata.get("model"),
+            "ai_provider": generation_metadata.get("provider")
+        }
 
         # Template workflow: Search for templates and await user selection
         if use_templates and slides_needing_demos:
@@ -1300,7 +1326,12 @@ async def process_ppt_background(
                     slide_data['demo_html'] = demo_html
 
             # Update document with generated demos
-            document.slides_data = {"slides": slides_data}
+            document.slides_data = {
+                "slides": slides_data,
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model"),
+                "ai_provider": generation_metadata.get("provider")
+            }
             document.status = "ready"
 
             db.commit()

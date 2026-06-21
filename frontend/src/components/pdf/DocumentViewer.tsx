@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import Cookies from 'js-cookie'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -9,6 +8,7 @@ import 'katex/dist/katex.min.css'
 import { WebEditor, DocumentVersion } from '@/components/WebEditor'
 import { VersionList } from '@/components/VersionList'
 import { useLanguage, Language } from '@/components/providers/LanguageProvider'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -50,6 +50,14 @@ interface InteractiveElement {
   title?: string
 }
 
+interface GenerationMetadata {
+  model?: string
+  provider?: string
+  generation_method?: string
+  generation_mode?: string
+  workflow_type?: string
+}
+
 interface DocumentData {
   id: number
   title: string
@@ -64,6 +72,10 @@ interface DocumentData {
   knowledge_cards?: KnowledgeCardsPayload
   interactive_elements?: InteractiveElement[]
   concept_data?: ConceptData
+  generation_metadata?: GenerationMetadata
+  ai_model?: string
+  ai_provider?: string
+  generation_mode?: string
   error_message?: string
   created_at: string
 }
@@ -89,7 +101,7 @@ export function DocumentViewer({ documentId, isPublic = false }: DocumentViewerP
   const websiteIframeRef = useRef<HTMLIFrameElement | null>(null)
   const currentWebsiteVersionIdRef = useRef<number | null>(null)
 
-  const getAuthToken = () => Cookies.get('access_token')
+  const getAuthToken = () => getStoredAuthToken()
 
   const getAuthHeaders = (): HeadersInit => {
     if (isPublic) return {}
@@ -358,6 +370,10 @@ export function DocumentViewer({ documentId, isPublic = false }: DocumentViewerP
     return (document?.knowledge_cards?.cards || []).map((card) => card.title).filter(Boolean) as string[]
   }, [document])
 
+  const generationModelLabel = useMemo(() => {
+    return document?.generation_metadata?.model || document?.ai_model || t('public_doc.legacy_model')
+  }, [document, t])
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -422,6 +438,7 @@ export function DocumentViewer({ documentId, isPublic = false }: DocumentViewerP
                   <p>{t('public_doc.grade')}：{document.grade_level ? `${document.grade_level}${t('public_doc.grade_suffix')}` : t('public_doc.not_specified')}</p>
                   <p>{t('public_doc.knowledge_point')}：{conceptName}</p>
                   <p>{t('public_doc.pages')}：{document.page_count}</p>
+                  <p>{t('public_doc.ai_model')}：{generationModelLabel}</p>
                 </div>
               </div>
 

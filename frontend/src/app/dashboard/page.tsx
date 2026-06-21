@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import Cookies from 'js-cookie'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/components/providers/AuthProvider'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
@@ -10,6 +9,7 @@ import { useLanguage, Language } from '@/components/providers/LanguageProvider'
 import { PDFUploadForm } from '@/components/pdf/PDFUploadForm'
 import { ConceptInputForm } from '@/components/pdf/ConceptInputForm'
 import PPTUploadForm from '@/components/ppt-viewer/PPTUploadForm'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -30,6 +30,12 @@ interface Document {
   is_current: number
   version_count: number
   user_prompt?: string
+  generation_metadata?: {
+    model?: string
+    provider?: string
+  }
+  ai_model?: string
+  ai_provider?: string
 }
 
 export default function DashboardPage() {
@@ -47,17 +53,23 @@ export default function DashboardPage() {
 
   const models: { value: AIModel; label: string; description: string }[] = [
     { value: 'glm-4.7', label: t('model.glm47'), description: t('model.glm47_desc') },
-    { value: 'claude-opus-4-7', label: 'Claude Opus 4.7', description: '最新旗舰推理模型' },
+    { value: 'glm-5', label: t('model.glm5'), description: t('model.glm5_desc') },
+    { value: 'glm-5.1', label: t('model.glm51'), description: t('model.glm51_desc') },
     { value: 'claude-opus-4-6', label: t('model.opus46'), description: t('model.opus46_desc') },
     { value: 'claude-sonnet-4-6', label: t('model.sonnet46'), description: t('model.sonnet46_desc') },
     { value: 'gpt-5.4', label: t('model.gpt54'), description: t('model.gpt54_desc') },
-    { value: 'gpt-5.5', label: t('model.gpt55'), description: t('model.gpt55_desc') },
     { value: 'deepseek-v4-pro', label: t('model.deepseek_v4_pro'), description: t('model.deepseek_v4_pro_desc') },
     { value: 'deepseek-v4-flash', label: t('model.deepseek_v4_flash'), description: t('model.deepseek_v4_flash_desc') },
-    { value: 'gemini-3.1-pro', label: t('model.gemini_pro'), description: t('model.gemini_pro_desc') },
+    { value: 'deepseek-v3.2', label: t('model.deepseek_v32'), description: t('model.deepseek_v32_desc') },
+    { value: 'gemini-3.1-pro-preview', label: t('model.gemini_pro'), description: t('model.gemini_pro_desc') },
+    { value: 'gemini-3-flash-preview', label: t('model.gemini_flash'), description: t('model.gemini_flash_desc') },
+    { value: 'gemini-2.5-pro', label: t('model.gemini25_pro'), description: t('model.gemini25_pro_desc') },
+    { value: 'gemini-2.5-flash', label: t('model.gemini25_flash'), description: t('model.gemini25_flash_desc') },
+    { value: 'doubao-seed-2-0-pro-260215', label: t('model.doubao_seed20_pro'), description: t('model.doubao_seed20_pro_desc') },
+    { value: 'doubao-seed-2-0-code-preview-260215', label: t('model.doubao_seed20_code'), description: t('model.doubao_seed20_code_desc') },
     { value: 'kimi-k2.6', label: t('model.kimi_k26'), description: t('model.kimi_k26_desc') },
     { value: 'minimax-m2.5', label: t('model.minimax_m25'), description: t('model.minimax_m25_desc') },
-    { value: 'qwen3.6-35b-a3b', label: t('model.qwen36_35b_a3b'), description: t('model.qwen36_35b_a3b_desc') },
+    { value: 'Qwen3.6-35B-inno', label: 'Qwen3.6 35B Inno', description: 'Qwen model via Innospark' },
   ]
 
   const languages: { value: Language; label: string }[] = [
@@ -65,14 +77,14 @@ export default function DashboardPage() {
     { value: 'en', label: 'English' },
   ]
 
-  const getAuthToken = () => Cookies.get('access_token')
+  const getAuthToken = () => getStoredAuthToken()
 
   const fetchDocuments = async () => {
     try {
       const token = getAuthToken()
       if (!token) throw new Error('Authentication required')
 
-      const response = await fetch(`${API_BASE_URL}/pdf/documents?limit=100`, {
+      const response = await fetch(`${API_BASE_URL}/pdf/documents?limit=0`, {
         headers: { Authorization: `Bearer ${token}` }
       })
 
@@ -95,6 +107,11 @@ export default function DashboardPage() {
   const processingCount = documents.filter((doc) => doc.status === 'processing').length
   const latestDocuments = [...documents].slice(0, 6)
   const displayedDocuments = showAllDocuments ? documents : latestDocuments
+  const getGenerationModelLabel = (doc: Document) => {
+    const model = doc.generation_metadata?.model || doc.ai_model
+    if (model) return model
+    return language === 'zh' ? '\u672a\u8bb0\u5f55\uff08\u65e7\u6587\u6863\uff09' : 'Not recorded (legacy document)'
+  }
   const handleLogout = async () => {
     await logout()
     router.push('/login')
@@ -197,6 +214,11 @@ export default function DashboardPage() {
                           <p className="mt-0.5 text-xs text-slate-500">
                             {doc.status === 'ready' ? t('dashboard.ready') : doc.status === 'processing' ? t('dashboard.processing_status') : t('dashboard.error_status')}
                           </p>
+                          {doc.status === 'ready' && (
+                            <p className="mt-1 line-clamp-1 text-xs text-violet-600">
+                              {language === 'zh' ? 'AI\u6a21\u578b' : 'AI model'}: {getGenerationModelLabel(doc)}
+                            </p>
+                          )}
                         </button>
                       ))
                     )}
@@ -266,7 +288,9 @@ export default function DashboardPage() {
                           className="flex items-center justify-between rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                         >
                           <span className="text-slate-600">{t('dashboard.ai_model')}:</span>
-                          <span className="ml-1 font-semibold text-violet-600">{selectedModel}</span>
+                          <span className="ml-1 font-semibold text-violet-600">
+                            {models.find((model) => model.value === selectedModel)?.label || selectedModel}
+                          </span>
                           <svg
                             className={`ml-2 h-4 w-4 transition-transform ${isModelDropdownOpen ? 'rotate-180' : ''}`}
                             fill="none"
@@ -278,7 +302,7 @@ export default function DashboardPage() {
                         </button>
 
                         {isModelDropdownOpen && (
-                          <div className="absolute left-0 z-50 mt-2 w-[260px] overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-lg">
+                          <div className="absolute left-0 z-50 mt-2 max-h-[70vh] w-[260px] overflow-y-auto rounded-2xl border border-slate-300 bg-white shadow-lg">
                             {models.map((model) => (
                               <button
                                 key={model.value}
@@ -423,6 +447,11 @@ export default function DashboardPage() {
                             <p className="mt-1 text-xs text-slate-500">
                               {doc.status === 'ready' ? t('dashboard.ready') : doc.status === 'processing' ? t('dashboard.processing_status') : t('dashboard.error_status')}
                             </p>
+                            {doc.status === 'ready' && (
+                              <p className="mt-1 line-clamp-1 text-xs font-medium text-violet-600">
+                                {language === 'zh' ? 'AI\u6a21\u578b' : 'AI model'}: {getGenerationModelLabel(doc)}
+                              </p>
+                            )}
                           </button>
                         ))
                       )}

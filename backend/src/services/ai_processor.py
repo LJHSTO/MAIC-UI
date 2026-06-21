@@ -11,11 +11,109 @@ from PIL import Image
 import PyPDF2
 from abc import ABC, abstractmethod
 from .prompts import ai_prompts
+from .mineru_pdf_parser import enhance_pdf_text_context_with_mineru
 from dataclasses import dataclass, field
 import re
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+DEFAULT_PDF_IMAGE_CONVERSION_PAGE_LIMIT = 50
+DEFAULT_PDF_ANALYSIS_IMAGE_PAGE_LIMIT = 16
+DEFAULT_PDF_WEBSITE_IMAGE_PAGE_LIMIT = 16
+DEFAULT_PDF_TEXT_CONTEXT_MAX_CHARS = 80000
+DEFAULT_PDF_TEXT_PAGE_CHAR_LIMIT = 1800
+DEFAULT_AI_REQUEST_TIMEOUT_SECONDS = 360
+
+
+def _get_int_env(name: str, default: int, minimum: int = 1, maximum: Optional[int] = None) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning("Invalid integer for %s=%r; using default %s", name, raw_value, default)
+        return default
+
+    if value < minimum:
+        logger.warning("%s=%s is below minimum %s; using %s", name, value, minimum, minimum)
+        return minimum
+    if maximum is not None and value > maximum:
+        logger.warning("%s=%s is above maximum %s; using %s", name, value, maximum, maximum)
+        return maximum
+    return value
+
+
+def get_pdf_analysis_image_page_limit() -> int:
+    return _get_int_env("PDF_ANALYSIS_IMAGE_PAGE_LIMIT", DEFAULT_PDF_ANALYSIS_IMAGE_PAGE_LIMIT, 1, 100)
+
+
+def get_pdf_website_image_page_limit() -> int:
+    return _get_int_env("PDF_WEBSITE_IMAGE_PAGE_LIMIT", DEFAULT_PDF_WEBSITE_IMAGE_PAGE_LIMIT, 1, 100)
+
+
+def get_pdf_image_conversion_page_limit() -> int:
+    return _get_int_env("PDF_IMAGE_CONVERSION_PAGE_LIMIT", DEFAULT_PDF_IMAGE_CONVERSION_PAGE_LIMIT, 1, 100)
+
+
+def get_pdf_text_context_max_chars() -> int:
+    return _get_int_env("PDF_TEXT_CONTEXT_MAX_CHARS", DEFAULT_PDF_TEXT_CONTEXT_MAX_CHARS, 1000, 300000)
+
+
+def get_pdf_text_page_char_limit() -> int:
+    return _get_int_env("PDF_TEXT_PAGE_CHAR_LIMIT", DEFAULT_PDF_TEXT_PAGE_CHAR_LIMIT, 500, 10000)
+
+
+def get_ai_request_timeout_seconds() -> int:
+    return _get_int_env("AI_REQUEST_TIMEOUT_SECONDS", DEFAULT_AI_REQUEST_TIMEOUT_SECONDS, 30, 1800)
+
+
+INNOSPARK_BASE_URL = "https://api.innospark.cn/v1"
+INNOSPARK_MODEL_ALIASES = {
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",
+    "gpt-5": "gpt-5.4",
+    "gpt-5.4-pro": "gpt-5.4",
+    "gpt-5.5": "gpt-5.4",
+    "claude-opus-4-7": "claude-opus-4-6",
+    "qwen3.6-27b": "Qwen3.6-35B-inno",
+    "qwen3.6-35b-a3b": "Qwen3.6-35B-inno",
+}
+INNOSPARK_MODELS = [
+    "gpt-5.4-pro",
+    "gpt-5.4",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "deepseek-v3.2",
+    "doubao-seed-2-0-pro-260215",
+    "doubao-seed-2-0-code-preview-260215",
+    "kimi-k2.6",
+    "Qwen3.6-35B-inno",
+]
+INNOSPARK_MODEL_INPUTS = set(INNOSPARK_MODELS) | set(INNOSPARK_MODEL_ALIASES)
+
+
+def is_innospark_model(model: Optional[str]) -> bool:
+    return bool(model and model in INNOSPARK_MODEL_INPUTS)
+
+
+def resolve_innospark_model(model: str) -> str:
+    return INNOSPARK_MODEL_ALIASES.get(model, model)
+
+
+def get_innospark_api_key() -> Optional[str]:
+    return os.getenv("INNOSPARK_API_KEY")
+
+
+def get_innospark_base_url() -> str:
+    return os.getenv("INNOSPARK_BASE_URL", INNOSPARK_BASE_URL)
 
 
 def _compact_pdf_text(text: str) -> str:
@@ -46,6 +144,8 @@ def _append_pdf_context_to_prompt(prompt: str, user_preferences: Optional[Dict],
                 "If it differs from page images, prioritize the extracted text.\n"
                 f"Text source: {pdf_context.get('source', 'unknown')}; "
                 f"pages with text: {pdf_context.get('pages_with_text', 0)}; "
+                f"included text pages: {pdf_context.get('included_pages', 0)}; "
+                f"selection: {pdf_context.get('selection_strategy', 'sequential')}; "
                 f"total text chars: {pdf_context.get('total_chars', 0)}.\n\n"
                 f"{excerpt}"
             )
@@ -55,6 +155,8 @@ def _append_pdf_context_to_prompt(prompt: str, user_preferences: Optional[Dict],
                 "如果原文是英文，输出仍使用简体中文，并保留必要英文术语及中文译名。\n"
                 f"文本来源: {pdf_context.get('source', 'unknown')}; "
                 f"有文本页数: {pdf_context.get('pages_with_text', 0)}; "
+                f"已纳入文本页数: {pdf_context.get('included_pages', 0)}; "
+                f"文本选择方式: {pdf_context.get('selection_strategy', 'sequential')}; "
                 f"文本总字符数: {pdf_context.get('total_chars', 0)}.\n\n"
                 f"{excerpt}"
             )
@@ -352,8 +454,8 @@ class EnglishProvider(AIProvider):
         )
         content.append({"type": "text", "text": prompt})
 
-        # Add images (limit to first 10 for token management)
-        max_images = min(len(images), 10)
+        # Add images with a configurable cap for long PDFs.
+        max_images = min(len(images), get_pdf_analysis_image_page_limit())
         for i in range(max_images):
             content.append({
                 "type": "image_url",
@@ -409,8 +511,8 @@ class EnglishProvider(AIProvider):
         prompt = self._get_website_generation_prompt(grade_level, interests, analysis)
         content.append({"type": "text", "text": prompt})
 
-        # Add images for website generation (limit to 15 pages)
-        max_images = min(len(images), 15)
+        # Add images for website generation with a configurable cap for long PDFs.
+        max_images = min(len(images), get_pdf_website_image_page_limit())
         for i in range(max_images):
             content.append({
                 "type": "image_url",
@@ -753,41 +855,51 @@ class ChineseProvider(AIProvider):
 
     # Model detection
     ANTHROPIC_MODELS = []  # Claude now goes through uuapi (openai_compat), not Anthropic SDK
-    ZHIPU_MODELS = ["glm-4.7", "glm-4.6v"]
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1"]
     OPENAI_COMPAT_MODELS = [
-        # Claude (via uuapi)
+        # Claude (via Innospark)
         "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-        # OpenAI GPT (via uuapi)
-        "gpt-5.4", "gpt-5.5",
+        # OpenAI GPT (via Innospark)
+        "gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5",
         # DeepSeek
-        "deepseek-v4-pro", "deepseek-v4-flash",
-        # Gemini (via uuapi)
-        "gemini-3.1-pro",
+        "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+        # Gemini (via Innospark)
+        "gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
+        "gemini-2.5-pro", "gemini-2.5-flash",
+        # Doubao
+        "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215",
         # Kimi (月之暗面)
         "kimi-k2.6",
         # GLM (via Zhipu OpenAI-compatible API)
-        "glm-4.7", "glm-4.6v",
+        "glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1",
         # Others (via SiliconFlow)
-        "minimax-m2.5", "qwen3.6-35b-a3b",
+        "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b", "Qwen3.6-35B-inno",
     ]
 
     # Internal name → SiliconFlow API model ID mapping
     SILICONFLOW_MODEL_MAP = {
         "minimax-m2.5": "MiniMaxAI/MiniMax-M2.5",
+        "qwen3.6-27b": "Qwen/Qwen3.6-27B",
         "qwen3.6-35b-a3b": "Qwen/Qwen3.6-35B-A3B",
     }
 
     # Model categories for routing to different API proxies
     CLAUDE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"]
-    GPT_MODELS = ["gpt-5.4", "gpt-5.5"]
-    GEMINI_MODELS = ["gemini-3.1-pro"]
-    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"]
-    ZHIPU_MODELS = ["glm-4.7", "glm-4.6v"]
+    GPT_MODELS = ["gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5"]
+    GEMINI_MODELS = [
+        "gemini-3.1-pro", "gemini-3.1-pro-preview", "gemini-3-flash-preview",
+        "gemini-2.5-pro", "gemini-2.5-flash",
+    ]
+    DEEPSEEK_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2"]
+    ZHIPU_MODELS = ["glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1"]
     KIMI_MODELS = ["kimi-k2.6"]
+    DOUBAO_MODELS = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215"]
 
     def _resolve_model(self, model: str) -> str:
         """Resolve internal model name to actual API model ID."""
         if self.backend == "openai_compat":
+            if is_innospark_model(model):
+                return resolve_innospark_model(model)
             # GLM pass through (Zhipu OpenAI-compatible API handles it)
             if model in self.ZHIPU_MODELS:
                 return model
@@ -816,9 +928,11 @@ class ChineseProvider(AIProvider):
     # Internal name → Google Gemini API model ID mapping
     GEMINI_MODEL_MAP = {
         "gemini-3.1-pro": "gemini-3.1-pro-preview",
+        "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
         "gemini-3.5-flash": "gemini-3.5-flash",
         "gemini-3-flash-preview": "gemini-3-flash-preview",
         "gemini-2.5-pro": "gemini-2.5-pro",
+        "gemini-2.5-flash": "gemini-2.5-flash",
     }
 
     # Internal name → uuapi Gemini model ID mapping
@@ -830,12 +944,15 @@ class ChineseProvider(AIProvider):
     DEEPSEEK_MODEL_MAP = {
         "deepseek-v4-pro": "deepseek-reasoner",
         "deepseek-v4-flash": "deepseek-chat",
+        "deepseek-v3.2": "deepseek-v3.2",
     }
 
     def _get_client_for_model(self, model: str):
         """Get the appropriate OpenAI client based on model category."""
         if self.backend != "openai_compat":
             return self.openai_client
+        if is_innospark_model(model) and self.innospark_client is not None:
+            return self.innospark_client
         if model in self.CLAUDE_MODELS and self.claude_client is not None:
             return self.claude_client
         if model in self.GPT_MODELS and self.gpt_client is not None:
@@ -866,19 +983,25 @@ class ChineseProvider(AIProvider):
         """
         self.model = model
         self.backend = self._detect_backend(model)
+        self.request_timeout_seconds = get_ai_request_timeout_seconds()
 
         # Auto-detect API key based on backend
         if not api_key:
             if self.backend == "anthropic":
                 api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
             elif self.backend == "openai_compat":
-                api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
+                if is_innospark_model(model):
+                    api_key = get_innospark_api_key()
+                elif model in self.ZHIPU_MODELS:
+                    api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
+                else:
+                    api_key = os.getenv("TRANSFER_API_KEY") or os.getenv("OPENAI_API_KEY")
             else:
                 api_key = os.getenv("ZHIPU_API_KEY") or os.getenv("TRANSFER_API_KEY")
 
         if not api_key:
             env_var_map = {"anthropic": "TRANSFER_API_KEY", "openai_compat": "TRANSFER_API_KEY", "zhipu": "ZHIPU_API_KEY"}
-            env_var = env_var_map.get(self.backend, "TRANSFER_API_KEY")
+            env_var = "INNOSPARK_API_KEY" if is_innospark_model(model) else env_var_map.get(self.backend, "TRANSFER_API_KEY")
             raise ValueError(f"API key not provided. Set {env_var} environment variable or pass api_key parameter.")
 
         # Initialize appropriate client
@@ -906,6 +1029,7 @@ class ChineseProvider(AIProvider):
             self.deepseek_client = None
             self.gemini_client = None
             self.kimi_client = None
+            self.innospark_client = None
             self.text_model = model
             logger.info(f"🎨 ChineseProvider initialized with Anthropic backend, model: {self.model}")
 
@@ -913,19 +1037,27 @@ class ChineseProvider(AIProvider):
             if not OPENAI_SDK_AVAILABLE:
                 raise ImportError("OpenAI SDK not installed. Install with: pip install openai")
 
-            # Main client: SiliconFlow (for DeepSeek/GLM/Kimi/MiniMax/Qwen)
+            # Main fallback client: SiliconFlow (for models not covered by Innospark or official APIs)
             compat_base_url = base_url or os.getenv("TRANSFER_BASE_URL", "https://api.siliconflow.cn/v1")
-            self.openai_client = OpenAIClient(api_key=api_key, base_url=compat_base_url)
+            self.openai_client = OpenAIClient(api_key=api_key, base_url=compat_base_url, timeout=self.request_timeout_seconds)
             self.anthropic_client = None
             self.zhipu_client = None
             self.text_model = model
             self.default_text_model = model
 
+            innospark_key = api_key if is_innospark_model(model) else get_innospark_api_key()
+            innospark_url = base_url if is_innospark_model(model) and base_url else get_innospark_base_url()
+            if innospark_key:
+                self.innospark_client = OpenAIClient(api_key=innospark_key, base_url=innospark_url, timeout=self.request_timeout_seconds)
+                logger.info(f"馃帹 Innospark client initialized: {innospark_url}")
+            else:
+                self.innospark_client = None
+
             # GPT client: uuapi.net
             gpt_key = os.getenv("GPT_API_KEY")
             gpt_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
             if gpt_key:
-                self.gpt_client = OpenAIClient(api_key=gpt_key, base_url=gpt_url)
+                self.gpt_client = OpenAIClient(api_key=gpt_key, base_url=gpt_url, timeout=self.request_timeout_seconds)
                 logger.info(f"🎨 GPT client initialized via uuapi: {gpt_url}")
             else:
                 self.gpt_client = None
@@ -934,7 +1066,7 @@ class ChineseProvider(AIProvider):
             claude_key = os.getenv("ANTHROPIC_API_KEY")
             claude_url = os.getenv("UUAPI_BASE_URL", "https://uuapi.net/v1")
             if claude_key:
-                self.claude_client = OpenAIClient(api_key=claude_key, base_url=claude_url)
+                self.claude_client = OpenAIClient(api_key=claude_key, base_url=claude_url, timeout=self.request_timeout_seconds)
                 logger.info(f"🎨 Claude client initialized via uuapi: {claude_url}")
             else:
                 self.claude_client = None
@@ -945,7 +1077,7 @@ class ChineseProvider(AIProvider):
             if gemini_key:
                 if "uuapi.net" in gemini_url:
                     # uuapi is OpenAI-compatible, use regular OpenAIClient
-                    self.gemini_client = OpenAIClient(api_key=gemini_key, base_url=gemini_url)
+                    self.gemini_client = OpenAIClient(api_key=gemini_key, base_url=gemini_url, timeout=self.request_timeout_seconds)
                     logger.info(f"🎨 Gemini client initialized via uuapi (OpenAI-compat): {gemini_url}")
                 else:
                     # Google official API, use GeminiClient adapter
@@ -958,7 +1090,7 @@ class ChineseProvider(AIProvider):
             zhipu_key = os.getenv("ZHIPU_API_KEY")
             zhipu_url = "https://open.bigmodel.cn/api/paas/v4"
             if zhipu_key:
-                self.zhipu_oa_client = OpenAIClient(api_key=zhipu_key, base_url=zhipu_url)
+                self.zhipu_oa_client = OpenAIClient(api_key=zhipu_key, base_url=zhipu_url, timeout=self.request_timeout_seconds)
                 logger.info(f"🎨 Zhipu GLM client initialized via OpenAI-compat: {zhipu_url}")
             else:
                 self.zhipu_oa_client = None
@@ -967,7 +1099,7 @@ class ChineseProvider(AIProvider):
             deepseek_key = os.getenv("DEEPSEEK_API_KEY")
             deepseek_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
             if deepseek_key:
-                self.deepseek_client = OpenAIClient(api_key=deepseek_key, base_url=deepseek_url)
+                self.deepseek_client = OpenAIClient(api_key=deepseek_key, base_url=deepseek_url, timeout=self.request_timeout_seconds)
                 logger.info(f"🎨 DeepSeek client initialized via official API: {deepseek_url}")
             else:
                 self.deepseek_client = None
@@ -976,7 +1108,7 @@ class ChineseProvider(AIProvider):
             kimi_key = os.getenv("KIMI_API_KEY")
             kimi_url = os.getenv("KIMI_BASE_URL", "https://api.moonshot.cn/v1")
             if kimi_key:
-                self.kimi_client = OpenAIClient(api_key=kimi_key, base_url=kimi_url)
+                self.kimi_client = OpenAIClient(api_key=kimi_key, base_url=kimi_url, timeout=self.request_timeout_seconds)
                 logger.info(f"🎨 Kimi client initialized via moonshot: {kimi_url}")
             else:
                 self.kimi_client = None
@@ -996,6 +1128,7 @@ class ChineseProvider(AIProvider):
             self.deepseek_client = None
             self.gemini_client = None
             self.kimi_client = None
+            self.innospark_client = None
             self.default_text_model = os.getenv("ZHIPU_TEXT_MODEL", "glm-4.7")
             self.text_model = self.default_text_model
             logger.info(f"🎨 ChineseProvider initialized with Zhipu backend, model: {self.model}")
@@ -1059,7 +1192,15 @@ class ChineseProvider(AIProvider):
             return self.zhipu_client.chat.completions.create(**params)
 
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, _make_sync_call)
+        try:
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, _make_sync_call),
+                timeout=self.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Zhipu API call timed out after {self.request_timeout_seconds}s for model {model}"
+            ) from exc
 
         # Log truncation reason for diagnostics.
         try:
@@ -1084,7 +1225,7 @@ class ChineseProvider(AIProvider):
     async def _run_openai_compat_call(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None) -> Any:
         """Run OpenAI-compatible API call via appropriate transfer station.
 
-        Routes to: SiliconFlow (DeepSeek/GLM/Kimi/MiniMax/Qwen) or uuapi (GPT/Gemini).
+        Routes to Innospark when available, otherwise provider-specific OpenAI-compatible clients.
         Returns the same response format as _run_zhipu_call (choices[0].message.content).
         """
         if self.openai_client is None:
@@ -1106,7 +1247,15 @@ class ChineseProvider(AIProvider):
             return client.chat.completions.create(**params)
 
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, _make_sync_call)
+        try:
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, _make_sync_call),
+                timeout=self.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"OpenAI-compatible API call timed out after {self.request_timeout_seconds}s for model {model}"
+            ) from exc
 
         # Log truncation diagnostics
         try:
@@ -1162,7 +1311,15 @@ class ChineseProvider(AIProvider):
                 return self.anthropic_client.messages.create(**params)
 
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, _make_sync_call)
+        try:
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, _make_sync_call),
+                timeout=self.request_timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(
+                f"Anthropic API call timed out after {self.request_timeout_seconds}s for model {model}"
+            ) from exc
 
         # Log truncation reason for diagnostics.
         try:
@@ -1245,8 +1402,8 @@ class ChineseProvider(AIProvider):
         grade_level = self._map_grade_level_to_string(grade_level_int)
         interests = user_preferences.get('interests', [])
 
-        # Prepare images (limit to first 5 pages due to context limits)
-        max_pages = min(len(images), 5)
+        # Prepare images with a configurable cap for long PDFs.
+        max_pages = min(len(images), get_pdf_analysis_image_page_limit())
         prompt = _append_pdf_context_to_prompt(
             self._get_content_analysis_prompt(grade_level, interests),
             user_preferences,
@@ -1649,6 +1806,24 @@ document.addEventListener("DOMContentLoaded", function() {
         """Get the name of the AI provider."""
         if self.backend == "anthropic":
             return f"ChineseProvider-Anthropic ({self.model})"
+        if self.backend == "openai_compat":
+            if is_innospark_model(self.model):
+                return f"Innospark ({resolve_innospark_model(self.model)})"
+            if self.model in self.GPT_MODELS:
+                return f"UUAPI GPT (OpenAI-compatible)"
+            if self.model in self.CLAUDE_MODELS:
+                return f"UUAPI Claude (OpenAI-compatible)"
+            if self.model in self.GEMINI_MODELS:
+                return f"UUAPI Gemini (OpenAI-compatible)"
+            if self.model in self.DEEPSEEK_MODELS:
+                return f"DeepSeek official (OpenAI-compatible)"
+            if self.model in self.KIMI_MODELS:
+                return f"Moonshot Kimi (OpenAI-compatible)"
+            if self.model in self.ZHIPU_MODELS:
+                return f"Zhipu GLM (OpenAI-compatible)"
+            if self.model.startswith("minimax-") or self.model.startswith("qwen"):
+                return f"SiliconFlow (OpenAI-compatible)"
+            return f"OpenAI-compatible transfer"
         return f"ChineseProvider-Zhipu ({self.model})"
 
     async def _generate_html_content(self, procedural_concepts: List[Dict], analysis: Dict, user_preferences: Dict) -> str:
@@ -2158,10 +2333,16 @@ class AIProcessor:
         # Step 1.5: Extract text so English PDFs and non-vision models still get real source content.
         text_start = time.time()
         pdf_text_context = self.extract_pdf_text_context(pdf_path)
+        pdf_text_context = await enhance_pdf_text_context_with_mineru(
+            pdf_path,
+            pdf_text_context,
+            logger=logger,
+        )
         text_time = time.time() - text_start
         logger.info(
-            "📝 PDF text extracted in %.2fs - pages with text: %s, chars: %s",
+            "📝 PDF text extracted in %.2fs - source: %s, pages with text: %s, chars: %s",
             text_time,
+            pdf_text_context.get("source", "unknown"),
             pdf_text_context.get("pages_with_text", 0),
             pdf_text_context.get("total_chars", 0)
         )
@@ -2174,7 +2355,8 @@ class AIProcessor:
         # Step 2: Convert PDF to images
         logger.info(f"🔄 Converting PDF to images...")
         conversion_start = time.time()
-        pdf_images = self.convert_pdf_to_images(pdf_path)
+        visual_page_limit = get_pdf_image_conversion_page_limit()
+        pdf_images = self.convert_pdf_to_images(pdf_path, max_pages=visual_page_limit)
         conversion_time = time.time() - conversion_start
         logger.info(f"🖼️ PDF to images conversion completed in {conversion_time:.2f}s - Generated {len(pdf_images)} images")
 
@@ -2254,11 +2436,18 @@ class AIProcessor:
             "knowledge_cards": knowledge_cards,
             "website": website_content,
             "processing_info": {
-                "total_pages": len(pdf_images),
-                "pages_processed": min(len(pdf_images), 15),
+                "total_pages": metadata.get("page_count", len(pdf_images)),
+                "pages_processed": len(pdf_images),
                 "images_generated": len(pdf_images),
+                "visual_page_limit": visual_page_limit,
+                "analysis_image_page_limit": get_pdf_analysis_image_page_limit(),
+                "website_image_page_limit": get_pdf_website_image_page_limit(),
                 "pdf_text_chars": pdf_text_context.get("total_chars", 0),
                 "pdf_text_pages": pdf_text_context.get("pages_with_text", 0),
+                "pdf_text_included_pages": pdf_text_context.get("included_pages", 0),
+                "pdf_text_included_chars": pdf_text_context.get("included_chars", 0),
+                "pdf_text_source": pdf_text_context.get("source", "unknown"),
+                "mineru_enhancement": pdf_text_context.get("mineru_enhancement", {}),
                 "analysis_diagnostics": content_analysis.get("analysis_diagnostics", {}),
                 "processing_method": f"ai-vision-{self.provider.get_provider_name().lower()}",
                 "ai_provider": self.provider.get_provider_name()
@@ -2535,8 +2724,10 @@ class AIProcessor:
             print(f"Error extracting PDF metadata: {e}")
             return {"page_count": 0, "title": "Unknown"}
 
-    def extract_pdf_text_context(self, pdf_path: str, max_chars: int = 50000) -> Dict:
+    def extract_pdf_text_context(self, pdf_path: str, max_chars: Optional[int] = None) -> Dict:
         """Extract readable text from a PDF for content analysis prompts."""
+        max_chars = max_chars if max_chars is not None else get_pdf_text_context_max_chars()
+        page_char_limit = get_pdf_text_page_char_limit()
         pages = []
         source = "pymupdf" if PYMUPDF_AVAILABLE else "pypdf2"
 
@@ -2563,42 +2754,65 @@ class AIProcessor:
         total_chars = sum(len(page["text"]) for page in pages)
         excerpts = []
         remaining = max_chars
-        for page in pages:
+        included_chars = 0
+        approx_block_chars = page_char_limit + 80
+        max_page_blocks = max(1, max_chars // approx_block_chars)
+        selection_strategy = "all_pages"
+        selected_pages = pages
+
+        if len(pages) > max_page_blocks:
+            selection_strategy = "balanced_page_sample"
+            if max_page_blocks == 1:
+                selected_indices = [0]
+            else:
+                step = (len(pages) - 1) / (max_page_blocks - 1)
+                selected_indices = sorted({round(index * step) for index in range(max_page_blocks)})
+            selected_pages = [pages[index] for index in selected_indices]
+
+        for page in selected_pages:
             if remaining <= 0:
                 break
             page_text = page["text"]
+            if len(page_text) > page_char_limit:
+                page_text = page_text[:page_char_limit].rstrip() + "\n...[page text truncated]"
             block = f"[Page {page['page']}]\n{page_text}"
             if len(block) > remaining:
-                block = block[:remaining]
+                block = block[:remaining].rstrip() + "\n...[context truncated]"
             excerpts.append(block)
+            included_chars += len(block)
             remaining -= len(block) + 2
 
         return {
             "source": source,
             "pages_with_text": len(pages),
             "total_chars": total_chars,
+            "included_pages": len(excerpts),
+            "included_chars": included_chars,
+            "max_chars": max_chars,
+            "page_char_limit": page_char_limit,
+            "selection_strategy": selection_strategy,
             "excerpt": "\n\n".join(excerpts),
         }
 
-    def convert_pdf_to_images(self, pdf_path: str) -> List[Dict]:
+    def convert_pdf_to_images(self, pdf_path: str, max_pages: Optional[int] = None) -> List[Dict]:
         """Convert PDF pages to images using PyMuPDF."""
         try:
             if PYMUPDF_AVAILABLE:
                 # Use PyMuPDF (no external dependencies)
                 try:
-                    return self._convert_with_pymupdf(pdf_path)
+                    return self._convert_with_pymupdf(pdf_path, max_pages=max_pages)
                 except Exception as pymupdf_error:
                     print(f"PyMuPDF failed ({pymupdf_error}), using text fallback")
-                    return self._create_text_based_representation(pdf_path)
+                    return self._create_text_based_representation(pdf_path, max_pages=max_pages)
             else:
                 # PyMuPDF not available - fallback
                 print("PyMuPDF not available, using fallback method")
-                return self._create_text_based_representation(pdf_path)
+                return self._create_text_based_representation(pdf_path, max_pages=max_pages)
 
         except Exception as e:
             raise Exception(f"Error converting PDF to images: {str(e)}")
 
-    def _convert_with_pymupdf(self, pdf_path: str) -> List[Dict]:
+    def _convert_with_pymupdf(self, pdf_path: str, max_pages: Optional[int] = None) -> List[Dict]:
         """Convert PDF to images using PyMuPDF (preferred method)."""
         try:
             doc_open_start = time.time()
@@ -2608,8 +2822,12 @@ class AIProcessor:
 
             processed_images = []
             processing_start = time.time()
+            page_count = len(doc)
+            pages_to_convert = min(page_count, max_pages or page_count)
+            if pages_to_convert < page_count:
+                logger.info("📄 Converting first %s of %s PDF pages to images", pages_to_convert, page_count)
 
-            for page_num in range(len(doc)):
+            for page_num in range(pages_to_convert):
                 page_start = time.time()
                 page = doc[page_num]
 
@@ -2647,14 +2865,19 @@ class AIProcessor:
             raise Exception(f"PyMuPDF conversion failed: {str(e)}")
 
   
-    def _create_text_based_representation(self, pdf_path: str) -> List[Dict]:
+    def _create_text_based_representation(self, pdf_path: str, max_pages: Optional[int] = None) -> List[Dict]:
         """Create a text-based representation of PDF pages when image conversion is not available."""
         try:
             with open(pdf_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
                 processed_images = []
 
-                for page_num, page in enumerate(pdf_reader.pages):
+                pages_to_convert = min(len(pdf_reader.pages), max_pages or len(pdf_reader.pages))
+                if pages_to_convert < len(pdf_reader.pages):
+                    logger.info("📄 Creating text-based images for first %s of %s PDF pages", pages_to_convert, len(pdf_reader.pages))
+
+                for page_num in range(pages_to_convert):
+                    page = pdf_reader.pages[page_num]
                     text = page.extract_text()
 
                     # Create a simple text-based "image" representation

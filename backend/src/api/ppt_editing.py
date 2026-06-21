@@ -45,7 +45,7 @@ class PPTEditRequest(BaseModel):
 	citations: List[CitationItem]
 	user_prompt: str
 	thinking_enabled: Optional[bool] = None
-	model: Optional[str] = None  # 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4', 'gpt-5.5', 'deepseek-v4-pro', 'gemini-3.1-pro', 'kimi-k2.6', 'qwen3.6-35b-a3b'
+	model: Optional[str] = None  # 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4', 'gpt-5.5', 'deepseek-v4-pro', 'gemini-3.1-pro', 'kimi-k2.6', 'qwen3.6-27b', 'qwen3.6-35b-a3b'
 
 
 class WebEditResponse(BaseModel):

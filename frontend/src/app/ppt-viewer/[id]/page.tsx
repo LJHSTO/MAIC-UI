@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Cookies from 'js-cookie';
 import { WebEditor, DocumentVersion } from '@/components/WebEditor';
 import { VersionList } from '@/components/VersionList';
+import { getStoredAuthToken } from '@/lib/auth-token';
 
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
@@ -35,6 +35,14 @@ interface HTMLSlideItem {
 
 type InteractiveItem = SlideItem | DemoItem | HTMLSlideItem;
 
+interface GenerationMetadata {
+  model?: string;
+  provider?: string;
+  generation_method?: string;
+  generation_mode?: string;
+  workflow_type?: string;
+}
+
 interface InteractiveViewData {
   document_id: number;
   title: string;
@@ -43,6 +51,9 @@ interface InteractiveViewData {
   is_public?: boolean;
   total_items: number;
   items: InteractiveItem[];
+  generation_metadata?: GenerationMetadata;
+  ai_model?: string;
+  ai_provider?: string;
 }
 
 interface StatusData {
@@ -58,6 +69,9 @@ interface StatusData {
     selected_pages?: number[];
   };
   template_options?: Record<number, any[]>;
+  generation_metadata?: GenerationMetadata;
+  ai_model?: string;
+  ai_provider?: string;
 }
 
 // Time estimation constants (same as config page)
@@ -96,18 +110,18 @@ function calculateEstimatedTime(
 function formatEstimatedTime(minutes: number, slide_count: number, processingConfig?: StatusData['processing_config']): string {
   if (!processingConfig) {
     const numberOfBatches = Math.ceil(slide_count / 5);
-    return `预计需要 ${numberOfBatches} * ${AVG_DEMOS_PER_BATCH} * ${MINUTES_PER_DEMO} = ${minutes} 分钟`;
+    return `棰勮闇€瑕?${numberOfBatches} * ${AVG_DEMOS_PER_BATCH} * ${MINUTES_PER_DEMO} = ${minutes} 鍒嗛挓`;
   }
 
   const mode = processingConfig.mode || 'batch';
 
   if (mode === 'specific_pages') {
     const selectedPages = processingConfig.selected_pages || [];
-    return `预计需要 ${selectedPages.length} * ${MINUTES_PER_PAGE} = ${minutes} 分钟`;
+    return `棰勮闇€瑕?${selectedPages.length} * ${MINUTES_PER_PAGE} = ${minutes} 鍒嗛挓`;
   } else {
     const batchSize = processingConfig.batch_size || 5;
     const numberOfBatches = Math.ceil(slide_count / batchSize);
-    return `预计需要 ${slide_count} / ${batchSize} * ${AVG_DEMOS_PER_BATCH} * ${MINUTES_PER_DEMO} = ${minutes} 分钟`;
+    return `棰勮闇€瑕?${slide_count} / ${batchSize} * ${AVG_DEMOS_PER_BATCH} * ${MINUTES_PER_DEMO} = ${minutes} 鍒嗛挓`;
   }
 }
 
@@ -210,7 +224,7 @@ export default function PPTViewerPage() {
 
   const fetchVersions = async () => {
     try {
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
       const headers: Record<string, string> = {};
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -232,7 +246,7 @@ export default function PPTViewerPage() {
         );
 
         if (!authResponse.ok) {
-          throw new Error(`获取版本失败：${authResponse.status}`);
+          throw new Error(`鑾峰彇鐗堟湰澶辫触锛?{authResponse.status}`);
         }
 
         const authResult = await authResponse.json();
@@ -251,7 +265,7 @@ export default function PPTViewerPage() {
           versionNumber: version.version_number,
           name: version.title,
           modifiedDate: version.created_at || new Date().toISOString(),
-          modificationPrompt: version.user_prompt || version.description || '无修改指令',
+          modificationPrompt: version.user_prompt || version.description || 'No modification prompt',
           html: '',
           isCurrent: Number(version.is_current) === 1,
           isRoot: Boolean(version.is_root)
@@ -264,7 +278,7 @@ export default function PPTViewerPage() {
       }
 
       if (!publicResponse.ok) {
-        throw new Error(`获取版本失败：${publicResponse.status}`);
+        throw new Error(`鑾峰彇鐗堟湰澶辫触锛?{publicResponse.status}`);
       }
 
       const result = await publicResponse.json();
@@ -283,7 +297,7 @@ export default function PPTViewerPage() {
         versionNumber: version.version_number,
         name: version.title,
         modifiedDate: version.created_at || new Date().toISOString(),
-        modificationPrompt: version.user_prompt || version.description || '无修改指令',
+        modificationPrompt: version.user_prompt || version.description || 'No modification prompt',
         html: '',
         isCurrent: Number(version.is_current) === 1,
         isRoot: Boolean(version.is_root)
@@ -299,7 +313,7 @@ export default function PPTViewerPage() {
 
   const handleApplyVersion = async (version: DocumentVersion) => {
     try {
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
       const publicResponse = await fetch(
         `${API_BASE_URL}/ppt/public/documents/${documentId}/versions/${version.documentId}/set-current`,
         { method: 'POST' }
@@ -317,12 +331,12 @@ export default function PPTViewerPage() {
         );
 
         if (!authResponse.ok) {
-          const errorData = await authResponse.json().catch(() => ({ detail: '设置当前版本失败' }));
-          throw new Error(errorData.detail || '设置当前版本失败');
+          const errorData = await authResponse.json().catch(() => ({ detail: '璁剧疆褰撳墠鐗堟湰澶辫触' }));
+          throw new Error(errorData.detail || '璁剧疆褰撳墠鐗堟湰澶辫触');
         }
       } else if (!publicResponse.ok) {
-        const errorData = await publicResponse.json().catch(() => ({ detail: '设置当前版本失败' }));
-        throw new Error(errorData.detail || '设置当前版本失败');
+        const errorData = await publicResponse.json().catch(() => ({ detail: '璁剧疆褰撳墠鐗堟湰澶辫触' }));
+        throw new Error(errorData.detail || '璁剧疆褰撳墠鐗堟湰澶辫触');
       }
 
       await fetchVersions();
@@ -340,10 +354,10 @@ export default function PPTViewerPage() {
     try {
       const versionId = Number(version.documentId);
       if (Number.isNaN(versionId)) {
-        throw new Error('无效的版本ID');
+        throw new Error('鏃犳晥鐨勭増鏈琁D');
       }
 
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
       const publicResponse = await fetch(
         `${API_BASE_URL}/ppt/public/documents/${documentId}/versions/${versionId}`,
         { method: 'DELETE' }
@@ -361,12 +375,12 @@ export default function PPTViewerPage() {
         );
 
         if (!authResponse.ok) {
-          const errorData = await authResponse.json().catch(() => ({ detail: '删除失败' }));
-          throw new Error(errorData.detail || '删除失败');
+          const errorData = await authResponse.json().catch(() => ({ detail: '鍒犻櫎澶辫触' }));
+          throw new Error(errorData.detail || '鍒犻櫎澶辫触');
         }
       } else if (!publicResponse.ok) {
-        const errorData = await publicResponse.json().catch(() => ({ detail: '删除失败' }));
-        throw new Error(errorData.detail || '删除失败');
+        const errorData = await publicResponse.json().catch(() => ({ detail: '鍒犻櫎澶辫触' }));
+        throw new Error(errorData.detail || '鍒犻櫎澶辫触');
       }
 
       await fetchVersions();
@@ -398,7 +412,7 @@ export default function PPTViewerPage() {
       if (!pollingRef.current) {
         setLoading(true);
       }
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
 
       // Try public endpoint first, then authenticated endpoint
       const headers: Record<string, string> = {};
@@ -490,7 +504,7 @@ export default function PPTViewerPage() {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
-      setError(err instanceof Error ? err.message : '加载演示文稿失败');
+      setError(err instanceof Error ? err.message : '鍔犺浇婕旂ず鏂囩澶辫触');
       setProcessing(false);
     } finally {
       setLoading(false);
@@ -505,7 +519,7 @@ export default function PPTViewerPage() {
         pollingRef.current = null;
       }
 
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
       const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : undefined;
 
       if (token) {
@@ -539,7 +553,7 @@ export default function PPTViewerPage() {
         setIsDocumentPublic(data.is_public);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载演示文稿失败');
+      setError(err instanceof Error ? err.message : '鍔犺浇婕旂ず鏂囩澶辫触');
     }
   };
 
@@ -555,7 +569,7 @@ export default function PPTViewerPage() {
       formData.append('title', file.name.replace('.html', ''));
       formData.append('insert_after_index', currentIndex.toString());
 
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
       const headers: Record<string, string> = {};
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -581,8 +595,8 @@ export default function PPTViewerPage() {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: '上传失败' }));
-        throw new Error(errorData.detail || '上传失败');
+        const errorData = await response.json().catch(() => ({ detail: '涓婁紶澶辫触' }));
+        throw new Error(errorData.detail || '涓婁紶澶辫触');
       }
 
       const result = await response.json();
@@ -599,9 +613,9 @@ export default function PPTViewerPage() {
         }
       }
 
-      alert('HTML文件上传成功！');
+      alert('HTML uploaded successfully');
     } catch (err) {
-      alert(err instanceof Error ? err.message : '上传HTML文件失败');
+      alert(err instanceof Error ? err.message : '涓婁紶HTML鏂囦欢澶辫触');
     } finally {
       setUploadingHTML(false);
       if (fileInputRef.current) {
@@ -629,7 +643,7 @@ export default function PPTViewerPage() {
   const saveInteractiveOrder = async (items: InteractiveItem[]) => {
     try {
       const targetDocumentId = currentVersionId ?? Number(documentId);
-      const token = Cookies.get('access_token');
+      const token = getStoredAuthToken();
 
       const payload = {
         order: items.map(item => ({
@@ -671,7 +685,7 @@ export default function PPTViewerPage() {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: '保存顺序失败' }));
+        const errorData = await response.json().catch(() => ({ detail: '淇濆瓨椤哄簭澶辫触' }));
         console.error('Failed to save interactive order:', errorData.detail || response.status);
       }
     } catch (err) {
@@ -792,7 +806,7 @@ export default function PPTViewerPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">正在加载演示文稿...</p>
+          <p className="text-gray-600">姝ｅ湪鍔犺浇婕旂ず鏂囩...</p>
         </div>
       </div>
     );
@@ -807,7 +821,7 @@ export default function PPTViewerPage() {
             onClick={() => router.push('/dashboard')}
             className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
           >
-            返回首页
+            杩斿洖棣栭〉
           </button>
         </div>
       </div>
@@ -824,9 +838,9 @@ export default function PPTViewerPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center max-w-md">
           <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600 mx-auto mb-4"></div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">正在处理演示文稿...</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">姝ｅ湪澶勭悊婕旂ず鏂囩...</h2>
           <p className="text-gray-600 mb-4">
-            {statusData?.message || 'AI 正在分析幻灯片并生成交互式演示'}
+            {statusData?.message || 'AI is analyzing slides and generating interactive demos'}
           </p>
           {statusData && (
             <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
@@ -840,18 +854,18 @@ export default function PPTViewerPage() {
           {estimatedMinutes && statusData?.slide_count && (
             <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm font-semibold text-yellow-900">
-                ⏱️ {formatEstimatedTime(estimatedMinutes, statusData.slide_count, statusData.processing_config)}
+                鈴憋笍 {formatEstimatedTime(estimatedMinutes, statusData.slide_count, statusData.processing_config)}
               </p>
               <p className="text-xs text-yellow-700 mt-1">
                 {statusData.processing_config?.mode === 'specific_pages'
-                  ? `基于 ${statusData.processing_config.selected_pages?.length || 0} 个选定页面`
-                  : `基于总共 ${statusData.slide_count} 页，批次大小 ${statusData.processing_config?.batch_size || 5}`
+                  ? `鍩轰簬 ${statusData.processing_config.selected_pages?.length || 0} 涓€夊畾椤甸潰`
+                  : `鍩轰簬鎬诲叡 ${statusData.slide_count} 椤碉紝鎵规澶у皬 ${statusData.processing_config?.batch_size || 5}`
                 }
               </p>
             </div>
           )}
           <p className="text-sm text-gray-500 mt-3">
-            这可能需要几分钟时间，请勿关闭此页面
+            杩欏彲鑳介渶瑕佸嚑鍒嗛挓鏃堕棿锛岃鍕垮叧闂椤甸潰
           </p>
         </div>
       </div>
@@ -868,6 +882,9 @@ export default function PPTViewerPage() {
   const isHTMLSlide = currentItem?.type === 'html_slide';
   const activeDocumentId = currentVersionId ?? Number(documentId);
   const backPath = isDocumentPublic ? '/public_documents' : '/dashboard';
+  const generationMetadata = viewData.generation_metadata || statusData?.generation_metadata;
+  const generationModel = generationMetadata?.model || viewData.ai_model || statusData?.ai_model;
+  const generationModelLabel = generationModel || '\u672a\u8bb0\u5f55\uff08\u65e7\u6587\u6863\uff09';
 
   return (
     <div
@@ -908,12 +925,19 @@ export default function PPTViewerPage() {
                 className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-semibold shadow-sm"
                 type="button"
               >
-                版本管理
+                鐗堟湰绠＄悊
               </button>
             </div>
             <p className="text-sm text-gray-500">
-              {viewData.subject} • {viewData.grade_level}年级
+              {viewData.subject} 鈥?{viewData.grade_level}骞寸骇
             </p>
+            {viewData && (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 font-medium text-indigo-700">
+                  {'AI\u6a21\u578b\uff1a'} {generationModelLabel}
+                </span>
+              </div>
+            )}
             {showVersionList && (
               <div className="absolute left-0 mt-3 w-[calc(100vw-2rem)] max-w-7xl z-20">
                 <VersionList
@@ -927,25 +951,25 @@ export default function PPTViewerPage() {
           <div className="flex items-center gap-2">
             {editStatus === 'processing' && (
               <span className="px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800 animate-pulse">
-                编辑应用中
+                缂栬緫搴旂敤涓?
               </span>
             )}
             {editStatus === 'completed' && (
               <span className="px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                编辑已完成！
+                缂栬緫宸插畬鎴愶紒
               </span>
             )}
             <button
               onClick={() => setShowNavbar(!showNavbar)}
               className="px-4 py-2 text-sm font-semibold rounded-lg border border-indigo-600 text-indigo-600 hover:bg-indigo-50 transition-colors"
             >
-              {showNavbar ? '隐藏导航' : '显示导航'}
+              {showNavbar ? '闅愯棌瀵艰埅' : '鏄剧ず瀵艰埅'}
             </button>
             <button
               onClick={() => router.push(backPath)}
               className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
             >
-              ← 返回
+              鈫?杩斿洖
             </button>
           </div>
         </div>
@@ -970,12 +994,12 @@ export default function PPTViewerPage() {
       >
         <div className="sticky top-0 bg-white border-b p-4 z-10">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-gray-900">页面导航</h3>
+            <h3 className="text-lg font-bold text-gray-900">椤甸潰瀵艰埅</h3>
             <button
               onClick={() => setShowNavbar(false)}
               className="text-gray-500 hover:text-gray-700"
             >
-              ✕
+              鉁?
             </button>
           </div>
         </div>
@@ -1016,13 +1040,13 @@ export default function PPTViewerPage() {
                   ) : item.type === 'demo' ? (
                     <div className="w-20 h-14 bg-indigo-100 rounded flex-shrink-0 flex items-center justify-center">
                       <span className="text-xs text-indigo-600 text-center px-1">
-                        交互式演示
+                        浜や簰寮忔紨绀?
                       </span>
                     </div>
                   ) : (
                     <div className="w-20 h-14 bg-green-100 rounded flex-shrink-0 flex items-center justify-center">
                       <span className="text-xs text-green-600 text-center px-1">
-                        网页
+                        缃戦〉
                       </span>
                     </div>
                   )}
@@ -1037,7 +1061,7 @@ export default function PPTViewerPage() {
                     </p>
                     <p className="text-xs text-gray-500 truncate">
                       {item.type === 'slide'
-                        ? `幻灯片 ${item.slide_number}`
+                        ? `骞荤伅鐗?${item.slide_number}`
                         : item.type === 'demo'
                         ? item.reason
                         : item.description}
@@ -1067,7 +1091,7 @@ export default function PPTViewerPage() {
               </h2>
               <p className="text-gray-600">{currentItem.description}</p>
               <p className="text-sm text-indigo-600 mt-4">
-                幻灯片 {currentItem.slide_number}
+                骞荤伅鐗?{currentItem.slide_number}
               </p>
             </div>
           </div>
@@ -1079,10 +1103,10 @@ export default function PPTViewerPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 bg-indigo-600 text-white text-sm rounded-full">
-                    交互式演示
+                    浜や簰寮忔紨绀?
                   </span>
                   <span className="text-sm text-gray-600">
-                    幻灯片 {currentItem.slide_number}
+                    骞荤伅鐗?{currentItem.slide_number}
                   </span>
                 </div>
                 {/* Zoom Controls */}
@@ -1090,43 +1114,43 @@ export default function PPTViewerPage() {
                   <button
                     onClick={zoomOut}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold"
-                    title="缩小"
+                    title="缂╁皬"
                   >
-                    −
+                    鈭?
                   </button>
                   <button
                     onClick={resetZoom}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 text-sm"
-                    title="重置缩放"
+                    title="閲嶇疆缂╂斁"
                   >
                     {zoomLevel}%
                   </button>
                   <button
                     onClick={zoomIn}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold"
-                    title="放大"
+                    title="鏀惧ぇ"
                   >
                     +
                   </button>
                   <button
                     onClick={fitToScreen}
                     className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-sm"
-                    title="适应屏幕"
+                    title="閫傚簲灞忓箷"
                   >
-                    适应屏幕
+                    閫傚簲灞忓箷
                   </button>
                   <button
                     onClick={toggleFullscreen}
                     className="px-3 py-1 bg-gray-800 hover:bg-gray-900 rounded text-white text-sm"
-                    title={isFullscreen ? "退出全屏" : "全屏"}
+                    title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
                   >
-                    {isFullscreen ? '退出全屏' : '全屏'}
+                    {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                   </button>
                 </div>
               </div>
               {isDemo && <p className="text-gray-700 mt-2">{currentItem.reason}</p>}
               {isDemo && <p className="text-xs text-gray-500 mt-1">
-                类型: {currentItem.demo_type}
+                绫诲瀷: {currentItem.demo_type}
               </p>}
             </div>
             {/* Demo container with fixed PPT dimensions and zoom */}
@@ -1149,7 +1173,7 @@ export default function PPTViewerPage() {
                   ref={demoIframeRef}
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin"
-                  title={`幻灯片 ${currentItem.slide_number} 的演示`}
+                  title={`Slide ${currentItem.slide_number} demo`}
                   style={{
                     transform: `scale(${zoomLevel / 100})`,
                     transformOrigin: 'top left',
@@ -1168,7 +1192,7 @@ export default function PPTViewerPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 bg-green-600 text-white text-sm rounded-full">
-                    插入的网页
+                    鎻掑叆鐨勭綉椤?
                   </span>
                   <span className="text-sm text-gray-600">
                     {currentItem.title}
@@ -1179,37 +1203,37 @@ export default function PPTViewerPage() {
                   <button
                     onClick={zoomOut}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold"
-                    title="缩小"
+                    title="缂╁皬"
                   >
-                    −
+                    鈭?
                   </button>
                   <button
                     onClick={resetZoom}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 text-sm"
-                    title="重置缩放"
+                    title="閲嶇疆缂╂斁"
                   >
                     {zoomLevel}%
                   </button>
                   <button
                     onClick={zoomIn}
                     className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-gray-700 font-bold"
-                    title="放大"
+                    title="鏀惧ぇ"
                   >
                     +
                   </button>
                   <button
                     onClick={fitToScreen}
                     className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-sm"
-                    title="适应屏幕"
+                    title="閫傚簲灞忓箷"
                   >
-                    适应屏幕
+                    閫傚簲灞忓箷
                   </button>
                   <button
                     onClick={toggleFullscreen}
                     className="px-3 py-1 bg-gray-800 hover:bg-gray-900 rounded text-white text-sm"
-                    title={isFullscreen ? "退出全屏" : "全屏"}
+                    title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
                   >
-                    {isFullscreen ? '退出全屏' : '全屏'}
+                    {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
                   </button>
                 </div>
               </div>
@@ -1254,7 +1278,7 @@ export default function PPTViewerPage() {
             disabled={isNavigationLocked || currentIndex === 0}
             className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            ← 上一页
+            鈫?涓婁竴椤?
           </button>
 
           <div className="text-center">
@@ -1263,7 +1287,7 @@ export default function PPTViewerPage() {
             </p>
             {isSlide && (
               <p className="text-sm text-gray-500">
-                {isDemo ? '交互式演示' : `幻灯片 ${(currentItem as SlideItem).slide_number}`}
+                {isDemo ? 'Interactive demo' : `Slide ${(currentItem as SlideItem).slide_number}`}
               </p>
             )}
           </div>
@@ -1273,7 +1297,7 @@ export default function PPTViewerPage() {
             disabled={isNavigationLocked || currentIndex === viewData.total_items - 1}
             className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            下一页 →
+            涓嬩竴椤?鈫?
           </button>
         </div>
 
@@ -1291,13 +1315,13 @@ export default function PPTViewerPage() {
             disabled={uploadingHTML}
             className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            {uploadingHTML ? '上传中...' : '📄 插入网页'}
+            {uploadingHTML ? '涓婁紶涓?..' : '馃搫 鎻掑叆缃戦〉'}
           </button>
         </div>
 
         {/* Keyboard hint */}
         <div className="text-center mt-4 text-sm text-gray-500">
-          使用方向键导航
+          浣跨敤鏂瑰悜閿鑸?
         </div>
       </main>
     </div>

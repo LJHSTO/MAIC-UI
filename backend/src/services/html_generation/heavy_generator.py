@@ -15,7 +15,7 @@ import asyncio
 import html as html_lib
 from typing import Dict, List, Optional, Any
 
-from .base_generator import BaseGenerator
+from .base_generator import BaseGenerator, FatalAIProviderError
 from .fast_generator import FastGenerator
 from ..validators import HTMLValidator, ContentValidator, SimulationValidator
 from ..templates.heavy_mode_prompts import get_stage_prompt, get_refinement_prompt
@@ -120,9 +120,7 @@ class HeavyGenerator(BaseGenerator):
             # Cache successful result
             self.cache.save_success(context, 'stage2', completed_stages['stage2'])
 
-            # Generate metadata and interactive elements using FastGenerator steps
-            fast_generator = FastGenerator(self.provider)
-            metadata_and_elements = await fast_generator._generate_metadata_and_interactive(
+            metadata_and_elements = await self._generate_metadata_if_provider_healthy(
                 procedural_concepts, analysis, user_preferences
             )
 
@@ -145,9 +143,35 @@ class HeavyGenerator(BaseGenerator):
             self.log_generation_complete(generation_time)
             return result
 
+        except FatalAIProviderError as e:
+            logger.warning("Heavy generation stopped early: %s", e.reason)
+            return await self._degrade_gracefully(completed_stages, analysis, user_preferences)
         except Exception as e:
             self.log_error("heavy_generation", e)
             return await self._degrade_gracefully(completed_stages, analysis, user_preferences)
+
+    async def _generate_metadata_if_provider_healthy(self, procedural_concepts: List,
+                                                     analysis: Dict, user_preferences: Dict) -> Dict:
+        """Avoid extra AI calls after quota/request-size failures."""
+        if self._last_provider_failure_reason:
+            logger.warning(
+                "Skipping metadata AI call after provider failure: %s",
+                self._last_provider_failure_reason
+            )
+            return {}
+
+        try:
+            fast_generator = FastGenerator(self.provider)
+            return await fast_generator._generate_metadata_and_interactive(
+                procedural_concepts, analysis, user_preferences
+            )
+        except FatalAIProviderError as e:
+            self._remember_provider_failure(e.reason)
+            logger.warning("Skipping metadata after fatal provider error: %s", e.reason)
+            return {}
+        except Exception as e:
+            logger.warning("Skipping metadata after non-fatal provider error: %s", e)
+            return {}
 
     def _build_context(self, analysis: Dict, user_preferences: Dict,
                       procedural_concepts: List, theme: Dict) -> Dict:
@@ -252,7 +276,17 @@ class HeavyGenerator(BaseGenerator):
             except asyncio.TimeoutError:
                 logger.warning(f"{stage_name} - Timeout on attempt {attempt + 1}")
                 last_error = "Generation timeout"
+            except FatalAIProviderError as e:
+                logger.error(f"{stage_name} - Fatal provider error: {e.reason}")
+                self._remember_provider_failure(e.reason)
+                return None
             except Exception as e:
+                fatal_reason = self._classify_fatal_provider_error(e)
+                if fatal_reason:
+                    logger.error(f"{stage_name} - Fatal provider error: {fatal_reason}")
+                    self._remember_provider_failure(fatal_reason)
+                    return None
+
                 logger.error(f"{stage_name} - Error: {e}")
                 last_error = str(e)
 
@@ -343,6 +377,11 @@ class HeavyGenerator(BaseGenerator):
                 return None
 
         except Exception as e:
+            fatal_reason = self._classify_fatal_provider_error(e)
+            if fatal_reason:
+                logger.error(f"AI provider fatal failure: {fatal_reason}")
+                raise FatalAIProviderError(fatal_reason) from e
+
             logger.error(f"AI provider call failed: {e}")
 
         return None
@@ -359,11 +398,16 @@ class HeavyGenerator(BaseGenerator):
         html_end = html_end_index + len('</html>') if html_end_index != -1 else -1
 
         if html_start != -1 and html_end > html_start:
-            return cleaned[html_start:html_end]
+            html = cleaned[html_start:html_end]
+            self._validate_complete_html_or_raise(html)
+            return html
 
         if html_start != -1:
-            return cleaned[html_start:]
+            html = cleaned[html_start:]
+            self._validate_complete_html_or_raise(html)
+            return html
 
+        self._validate_complete_html_or_raise(cleaned)
         return cleaned
 
     async def _degrade_gracefully(self, completed_stages: Dict, analysis: Dict,
@@ -378,15 +422,10 @@ class HeavyGenerator(BaseGenerator):
         else:
             html = self._emergency_template(analysis, user_preferences)
 
-        # Try to generate metadata and interactive elements via FastGenerator
-        try:
-            procedural_concepts = self._extract_procedural_concepts(analysis)
-            fast_generator = FastGenerator(self.provider)
-            metadata_and_elements = await fast_generator._generate_metadata_and_interactive(
-                procedural_concepts, analysis, user_preferences
-            )
-        except Exception:
-            metadata_and_elements = {}
+        procedural_concepts = self._extract_procedural_concepts(analysis)
+        metadata_and_elements = await self._generate_metadata_if_provider_healthy(
+            procedural_concepts, analysis, user_preferences
+        )
 
         return {
             "html": html,
@@ -398,6 +437,7 @@ class HeavyGenerator(BaseGenerator):
             "generation_info": {
                 "mode": "heavy",
                 "fallback_used": True,
+                "fallback_reason": self._last_provider_failure_reason,
                 "stages_completed": len(completed_stages),
                 "refinements": {}
             }
@@ -416,7 +456,7 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
         return html.replace('</head>', style + '</head>')
 
     def _emergency_template(self, analysis: Dict, user_preferences: Dict) -> str:
-        """Deterministic interactive page used when remote HTML generation times out."""
+        """Deterministic interactive page used when remote HTML generation cannot finish."""
         subject = html_lib.escape(str(analysis.get('subject_area', '学习')))
         topics = analysis.get('main_topics', []) or []
         concepts = analysis.get('key_concepts', []) or []
@@ -477,7 +517,7 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
         <header class="mb-6">
             <p class="text-sm font-semibold text-violet-700">本地交互学习页</p>
             <h1 class="mt-2 text-3xl font-bold text-slate-950">{subject}</h1>
-            <p class="mt-3 text-slate-600">远端大模型生成完整页面超时，系统已基于PDF内容分析生成可运行的交互学习页。</p>
+            <p class="mt-3 text-slate-600">远端大模型生成完整页面失败或超限，系统已基于PDF内容分析生成可运行的交互学习页。</p>
         </header>
 
         <div class="grid gap-5 lg:grid-cols-[0.92fr_1.08fr]">
@@ -755,14 +795,10 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
     async def _generate_fallback(self, pdf_images: List[Dict], analysis: Dict,
                                  user_preferences: Dict) -> Dict:
         """Generate complete fallback response."""
-        try:
-            procedural_concepts = self._extract_procedural_concepts(analysis)
-            fast_generator = FastGenerator(self.provider)
-            metadata_and_elements = await fast_generator._generate_metadata_and_interactive(
-                procedural_concepts, analysis, user_preferences
-            )
-        except Exception:
-            metadata_and_elements = {}
+        procedural_concepts = self._extract_procedural_concepts(analysis)
+        metadata_and_elements = await self._generate_metadata_if_provider_healthy(
+            procedural_concepts, analysis, user_preferences
+        )
 
         return {
             "html": self._emergency_template(analysis, user_preferences),
@@ -774,6 +810,7 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
             "generation_info": {
                 "mode": "heavy",
                 "fallback_used": True,
+                "fallback_reason": self._last_provider_failure_reason,
                 "stages_completed": 0,
                 "refinements": {}
             }

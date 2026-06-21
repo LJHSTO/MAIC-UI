@@ -1,18 +1,27 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException, Depends, Form, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable, Awaitable, Tuple
 import os
 import uuid
 import json
 import time
 import logging
+import re
 from pathlib import Path
 
 from ..core.database import get_db, SessionLocal
 from ..models.document import Document
 from ..models.user import User
-from ..services.ai_processor import AIProcessor
+from ..services.ai_processor import (
+    AIProcessor,
+    get_pdf_image_conversion_page_limit,
+    get_innospark_api_key,
+    get_innospark_base_url,
+    is_innospark_model,
+    resolve_innospark_model,
+)
+from ..services.generation_metadata import build_generation_metadata, get_generation_metadata
 from ..core.security import get_current_user
 
 # Configure logging
@@ -21,14 +30,25 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+MIN_GENERATED_HTML_BYTES = 8 * 1024
+MIN_GENERATED_HTML_CONTROLS = 3
+
 # Model to provider mapping
 CHINESE_MODELS = ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
-                  "glm-4.7", "glm-4.6v",
-                  "gpt-5.4", "gpt-5.5",
-                  "deepseek-v4-pro", "deepseek-v4-flash",
-                  "gemini-3.1-pro",
+                  "glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1",
+                  "gpt-5", "gpt-5.4-pro", "gpt-5.4", "gpt-5.5",
+                  "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+                  "gemini-3.1-pro", "gemini-3.1-pro-preview",
+                  "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+                  "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-code-preview-260215",
                   "kimi-k2.6",
-                  "minimax-m2.5", "qwen3.6-35b-a3b"]
+                  "minimax-m2.5", "qwen3.6-27b", "qwen3.6-35b-a3b", "Qwen3.6-35B-inno"]
+ZHIPU_MODELS = {"glm-4.7", "glm-4.6", "glm-4.6v", "glm-5", "glm-5.1"}
+TRANSFER_MODELS = {
+    "minimax-m2.5",
+    "qwen3.6-27b",
+    "qwen3.6-35b-a3b",
+}
 
 
 def get_provider_for_model(model: str) -> str:
@@ -85,21 +105,25 @@ def get_ai_processor(generation_mode: str = "fast", ai_model: Optional[str] = No
     elif provider_type == 'chinese':
         # Unified Chinese provider - auto-detect backend from model name
         # For vision tasks, prefer glm-4.6v; for text generation, use specified model
-        if ai_model and ai_model.startswith('claude-'):
+        if ai_model and is_innospark_model(ai_model):
+            model = resolve_innospark_model(ai_model)
+            api_key = get_innospark_api_key()
+            base_url = get_innospark_base_url()
+        elif ai_model and ai_model.startswith('claude-'):
             # Anthropic model via transfer station
             model = ai_model
             api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('ANTHROPIC_API_KEY')
             transfer_url = os.getenv('TRANSFER_BASE_URL', '')
             base_url = transfer_url.replace('/v1', '') if transfer_url else os.getenv('ANTHROPIC_BASE_URL')
-        elif ai_model and ai_model in ["gpt-5.4", "gpt-5.5",
-                                        "deepseek-v4-pro", "deepseek-v4-flash",
-                                        "gemini-3.1-pro",
-                                        "kimi-k2.6",
-                                        "minimax-m2.5", "qwen3.6-35b-a3b"]:
+        elif ai_model and ai_model in TRANSFER_MODELS:
             # OpenAI-compatible model via transfer station
             model = ai_model
             api_key = os.getenv('TRANSFER_API_KEY') or os.getenv('OPENAI_API_KEY')
             base_url = os.getenv('TRANSFER_BASE_URL')
+        elif ai_model and ai_model in ZHIPU_MODELS:
+            model = ai_model
+            api_key = os.getenv('ZHIPU_API_KEY') or os.getenv('TRANSFER_API_KEY')
+            base_url = None
         else:
             # Default: use transfer station for all models
             model = ai_model or os.getenv('TRANSFER_MODEL', 'glm-4.7')
@@ -118,6 +142,231 @@ def get_ai_processor(generation_mode: str = "fast", ai_model: Optional[str] = No
         raise ValueError(f"Unsupported provider: {provider_type}. Supported providers: english, chinese")
 
     return AIProcessor(provider_config=provider_config, generation_mode=generation_mode)
+
+
+def _clean_pdf_concept_data(raw_concept_data: Optional[Dict[str, Any]], subject: Optional[str] = None) -> Dict[str, str]:
+    """Normalize optional concept-focus fields submitted with a PDF upload."""
+    if not isinstance(raw_concept_data, dict):
+        raw_concept_data = {}
+
+    concept_data = {
+        "subject": raw_concept_data.get("subject") or subject or "",
+        "lesson_id": raw_concept_data.get("lesson_id") or "",
+        "source_chapter": raw_concept_data.get("source_chapter") or "",
+        "source_section": raw_concept_data.get("source_section") or "",
+        "page_range": raw_concept_data.get("page_range") or "",
+        "concept_name": raw_concept_data.get("concept_name") or "",
+        "concept_overview": raw_concept_data.get("concept_overview") or "",
+        "mastery_points": raw_concept_data.get("mastery_points") or "",
+        "design_idea": raw_concept_data.get("design_idea") or "",
+        "assessment_focus": raw_concept_data.get("assessment_focus") or "",
+        "tracking_plan": raw_concept_data.get("tracking_plan") or "",
+    }
+
+    return {
+        key: str(value).strip()
+        for key, value in concept_data.items()
+        if value is not None and str(value).strip()
+    }
+
+
+def _build_pdf_concept_instruction(concept_data: Dict[str, str]) -> str:
+    if not concept_data:
+        return ""
+
+    lines = [
+        "PDF + 知识点聚焦生成要求：",
+        "请以 PDF 内容为事实依据，但围绕以下教师自定义知识点目标组织课程、例子、互动和练习。"
+    ]
+    field_labels = {
+        "subject": "科目",
+        "lesson_id": "课程序号",
+        "source_chapter": "来源章节",
+        "source_section": "来源小节",
+        "page_range": "原始 PDF 页码范围",
+        "concept_name": "知识点",
+        "concept_overview": "知识点概述",
+        "mastery_points": "学生掌握要点",
+        "design_idea": "教学设计思路",
+        "assessment_focus": "追踪评估重点",
+        "tracking_plan": "学习行为追踪计划",
+    }
+
+    for key, label in field_labels.items():
+        value = concept_data.get(key)
+        if value:
+            lines.append(f"- {label}: {value}")
+
+    lines.append("如果 PDF 中存在多个主题，请优先选择与该知识点最相关的章节和内容。")
+    return "\n".join(lines)
+
+
+def _apply_pdf_concept_preferences(
+    user_prefs: Dict[str, Any],
+    subject: Optional[str],
+    description: Optional[str]
+) -> Dict[str, Any]:
+    """Attach PDF+concept focus settings to user preferences used by the AI pipeline."""
+    concept_data = _clean_pdf_concept_data(user_prefs.get("concept_data"), subject)
+    if not concept_data:
+        return user_prefs
+
+    concept_instruction = _build_pdf_concept_instruction(concept_data)
+    existing_description = (description or user_prefs.get("description") or "").strip()
+    user_prefs["concept_data"] = concept_data
+    user_prefs["pdf_generation_mode"] = "pdf_with_concept_focus"
+    user_prefs["pdf_concept_instruction"] = concept_instruction
+    user_prefs["description"] = (
+        f"{existing_description}\n\n{concept_instruction}".strip()
+        if existing_description
+        else concept_instruction
+    )
+    user_prefs["learning_goal"] = user_prefs["description"]
+    return user_prefs
+
+
+def _get_generation_fallback_reason(result: Dict[str, Any]) -> Optional[str]:
+    """Return the fallback reason when a generation result used fallback output."""
+    if not isinstance(result, dict):
+        return None
+
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    processing_info = result.get("processing_info") if isinstance(result.get("processing_info"), dict) else {}
+    website = result.get("website") if isinstance(result.get("website"), dict) else {}
+    website_metadata = website.get("metadata") if isinstance(website.get("metadata"), dict) else {}
+    generation_info = website.get("generation_info") if isinstance(website.get("generation_info"), dict) else {}
+
+    fallback_sources = (metadata, processing_info, website, website_metadata, generation_info)
+    if not any(source.get("fallback_used") for source in fallback_sources):
+        return None
+
+    for source in fallback_sources:
+        for key in ("fallback_reason", "upstream_error", "error"):
+            value = source.get(key)
+            if value:
+                return str(value)[:1000]
+
+    return "generation returned fallback output"
+
+
+def _extract_generated_html(result: Dict[str, Any]) -> str:
+    """Extract generated HTML from either normal or template generation results."""
+    if not isinstance(result, dict):
+        return ""
+
+    website = result.get("website")
+    if isinstance(website, dict) and isinstance(website.get("html"), str):
+        return website["html"]
+
+    html = result.get("html")
+    return html if isinstance(html, str) else ""
+
+
+def _count_generated_html_controls(html: str) -> int:
+    """Count visible learner controls likely to support active interaction."""
+    control_patterns = (
+        r"<\s*(?:button|input|select|textarea)\b",
+        r"\brole\s*=\s*['\"]button['\"]",
+    )
+    return sum(len(re.findall(pattern, html, flags=re.IGNORECASE)) for pattern in control_patterns)
+
+
+def _validate_generated_html(html: str) -> List[str]:
+    """Validate that generated HTML is a usable active-learning page before marking ready."""
+    issues: List[str] = []
+
+    if not isinstance(html, str) or not html.strip():
+        return ["empty generated HTML"]
+
+    html_size = len(html.encode("utf-8"))
+    if html_size < MIN_GENERATED_HTML_BYTES:
+        issues.append(f"HTML too small: {html_size} bytes < {MIN_GENERATED_HTML_BYTES} bytes")
+
+    if "trackEvent" not in html:
+        issues.append("missing trackEvent learning-event logger")
+
+    if re.search(r"<\s*canvas\b", html, flags=re.IGNORECASE) is None:
+        issues.append("missing canvas element")
+
+    control_count = _count_generated_html_controls(html)
+    if control_count < MIN_GENERATED_HTML_CONTROLS:
+        issues.append(f"too few learner controls: {control_count} < {MIN_GENERATED_HTML_CONTROLS}")
+
+    return issues
+
+
+def _build_html_quality_payload(
+    passed: bool,
+    issues: List[str],
+    attempts: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    return {
+        "passed": passed,
+        "issues": issues,
+        "attempts": attempts,
+        "rules": {
+            "min_html_bytes": MIN_GENERATED_HTML_BYTES,
+            "requires_track_event": True,
+            "requires_canvas": True,
+            "min_controls": MIN_GENERATED_HTML_CONTROLS,
+        },
+    }
+
+
+async def _generate_with_html_quality_retry(
+    generate_once: Callable[[], Awaitable[Dict[str, Any]]],
+    workflow_label: str,
+    max_retries: int = 1,
+) -> Tuple[Dict[str, Any], List[str], List[Dict[str, Any]]]:
+    """Run generation and retry once when final HTML fails quality validation."""
+    attempts: List[Dict[str, Any]] = []
+    last_result: Dict[str, Any] = {}
+    last_issues: List[str] = []
+
+    for attempt_index in range(max_retries + 1):
+        last_result = await generate_once()
+        if not isinstance(last_result, dict):
+            last_result = {
+                "status": "error",
+                "error": "generation returned non-dict result",
+            }
+
+        if last_result.get("status") == "error":
+            attempts.append({
+                "attempt": attempt_index + 1,
+                "status": "error",
+                "error": str(last_result.get("error", ""))[:1000],
+            })
+            return last_result, [], attempts
+
+        html = _extract_generated_html(last_result)
+        last_issues = _validate_generated_html(html)
+        fallback_reason = _get_generation_fallback_reason(last_result)
+        attempts.append({
+            "attempt": attempt_index + 1,
+            "status": "failed_quality" if last_issues else "passed",
+            "html_bytes": len(html.encode("utf-8")) if isinstance(html, str) else 0,
+            "control_count": _count_generated_html_controls(html) if isinstance(html, str) else 0,
+            "issues": last_issues,
+            "fallback_used": bool(fallback_reason),
+            "fallback_reason": fallback_reason,
+        })
+
+        if not last_issues:
+            return last_result, [], attempts
+
+        if attempt_index < max_retries:
+            logger.warning(
+                "%s generated invalid HTML on attempt %s/%s; retrying. Issues: %s",
+                workflow_label,
+                attempt_index + 1,
+                max_retries + 1,
+                "; ".join(last_issues),
+            )
+
+    logger.error("%s failed HTML quality validation after retry: %s", workflow_label, "; ".join(last_issues))
+    return last_result, last_issues, attempts
+
 
 # Ensure uploads directory exists
 UPLOAD_DIR = Path("uploads")
@@ -165,31 +414,88 @@ async def process_pdf_background(
         # Process PDF with configured AI provider
         logger.info(f"🔄 Starting AI processing pipeline in background...")
         ai_processing_start = time.time()
-        result = await ai_processor.process_pdf_complete(
-            str(file_path),
-            user_preferences=user_prefs
+        async def generate_pdf_once() -> Dict[str, Any]:
+            return await ai_processor.process_pdf_complete(
+                str(file_path),
+                user_preferences=user_prefs
+            )
+
+        result, html_quality_issues, html_quality_attempts = await _generate_with_html_quality_retry(
+            generate_pdf_once,
+            workflow_label=f"PDF document {document_id}",
+            max_retries=1,
         )
         ai_processing_time = time.time() - ai_processing_start
         logger.info(f"✅ Background AI processing completed in {ai_processing_time:.2f}s")
 
-        if result["status"] == "error":
-            logger.error(f"❌ Background processing failed: {result['error']}")
+        if result.get("status") == "error":
+            logger.error("Background processing failed: %s", result.get("error"))
             document.status = "error"
-            document.error_message = result['error']
+            document.error_message = result.get("error", "Generation failed")
         else:
+            fallback_reason = _get_generation_fallback_reason(result)
+            if html_quality_issues:
+                error_message = (
+                    "Generated HTML failed quality validation after retry; "
+                    f"issues: {'; '.join(html_quality_issues)}"
+                )
+                logger.error(f"Background PDF processing failed HTML validation: {error_message}")
+                document.status = "error"
+                document.error_message = error_message
+                document.page_count = result.get("metadata", {}).get("page_count", 0)
+                document.pdf_metadata = result.get("metadata", {})
+                document.processing_results = {
+                    "analysis": result.get("analysis", {}),
+                    "knowledge_cards": result.get("knowledge_cards", {}),
+                    "failed_website": _extract_generated_html(result),
+                    "processing_info": result.get("processing_info", {}),
+                    "generation_mode": result.get("website", {}).get("mode_used", generation_mode),
+                    "html_quality_validation": _build_html_quality_payload(
+                        False,
+                        html_quality_issues,
+                        html_quality_attempts,
+                    ),
+                    "fallback_used": bool(fallback_reason),
+                    "fallback_reason": fallback_reason,
+                }
+                background_db.commit()
+                total_time = time.time() - start_time
+                logger.info(f"Background PDF processing failed due to invalid HTML for document {document_id} in {total_time:.2f}s total")
+                return
+
+            website_result = result.get("website", {})
+            generation_metadata = build_generation_metadata(
+                ai_processor,
+                requested_model=ai_model,
+                generation_mode=website_result.get("mode_used", generation_mode),
+                workflow_type="pdf",
+                generation_method="ai"
+            )
+            concept_data = _clean_pdf_concept_data(user_prefs.get("concept_data"), document.subject)
             # Update document with processing results
             document.status = "ready"
-            document.page_count = result["metadata"].get("page_count", 0)
-            document.pdf_metadata = result["metadata"]
+            document.page_count = result.get("metadata", {}).get("page_count", 0)
+            document.pdf_metadata = result.get("metadata", {})
             document.processing_results = {
-                "analysis": result["analysis"],
+                "analysis": result.get("analysis", {}),
                 "knowledge_cards": result.get("knowledge_cards", {}),
-                "website": result["website"]["html"],
-                "interactive_elements": result["website"]["interactive_elements"],
-                "processing_info": result["processing_info"],
-                "generation_mode": result["website"].get("mode_used", generation_mode)
+                "website": website_result.get("html", ""),
+                "interactive_elements": website_result.get("interactive_elements", []),
+                "processing_info": result.get("processing_info", {}),
+                "generation_mode": website_result.get("mode_used", generation_mode),
+                "concept_data": concept_data or None,
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model"),
+                "ai_provider": generation_metadata.get("provider"),
+                "html_quality_validation": _build_html_quality_payload(
+                    True,
+                    [],
+                    html_quality_attempts,
+                ),
+                "fallback_used": bool(fallback_reason),
+                "fallback_reason": fallback_reason,
             }
-            logger.info(f"✅ Document {document_id} marked as ready with generation_mode: {result['website'].get('mode_used', generation_mode)}")
+            logger.info(f"✅ Document {document_id} marked as ready with generation_mode: {website_result.get('mode_used', generation_mode)}")
             logger.info(f"✅ Document {document_id} marked as ready")
 
         background_db.commit()
@@ -247,28 +553,81 @@ async def process_concept_background(
         # Process concept with configured AI provider
         logger.info(f"🔄 Starting AI concept processing in background...")
         ai_processing_start = time.time()
-        result = await ai_processor.process_concept_complete(
-            concept_data=concept_data,
-            user_preferences=user_prefs
+        async def generate_concept_once() -> Dict[str, Any]:
+            return await ai_processor.process_concept_complete(
+                concept_data=concept_data,
+                user_preferences=user_prefs
+            )
+
+        result, html_quality_issues, html_quality_attempts = await _generate_with_html_quality_retry(
+            generate_concept_once,
+            workflow_label=f"Concept document {document_id}",
+            max_retries=1,
         )
         ai_processing_time = time.time() - ai_processing_start
         logger.info(f"✅ Background AI concept processing completed in {ai_processing_time:.2f}s")
 
-        if result["status"] == "error":
-            logger.error(f"❌ Background concept processing failed: {result['error']}")
+        if result.get("status") == "error":
+            logger.error("Background concept processing failed: %s", result.get("error"))
             document.status = "error"
-            document.error_message = result['error']
+            document.error_message = result.get("error", "Generation failed")
         else:
+            fallback_reason = _get_generation_fallback_reason(result)
+            if html_quality_issues:
+                error_message = (
+                    "Generated HTML failed quality validation after retry; "
+                    f"issues: {'; '.join(html_quality_issues)}"
+                )
+                logger.error(f"Background concept processing failed HTML validation: {error_message}")
+                document.status = "error"
+                document.error_message = error_message
+                document.page_count = result.get("metadata", {}).get("page_count", 1)
+                document.pdf_metadata = result.get("metadata", {})
+                document.processing_results = {
+                    "analysis": result.get("analysis", {}),
+                    "failed_website": _extract_generated_html(result),
+                    "processing_info": result.get("processing_info", {}),
+                    "concept_data": result.get("processing_info", {}).get("concept_data", {}),
+                    "html_quality_validation": _build_html_quality_payload(
+                        False,
+                        html_quality_issues,
+                        html_quality_attempts,
+                    ),
+                    "fallback_used": bool(fallback_reason),
+                    "fallback_reason": fallback_reason,
+                }
+                background_db.commit()
+                total_time = time.time() - start_time
+                logger.info(f"Background concept processing failed due to invalid HTML for document {document_id} in {total_time:.2f}s total")
+                return
+
+            generation_metadata = build_generation_metadata(
+                ai_processor,
+                requested_model=ai_model,
+                workflow_type="concept",
+                generation_method="ai"
+            )
+            website_result = result.get("website", {})
             # Update document with processing results
             document.status = "ready"
-            document.page_count = result["metadata"].get("page_count", 1)
-            document.pdf_metadata = result["metadata"]
+            document.page_count = result.get("metadata", {}).get("page_count", 1)
+            document.pdf_metadata = result.get("metadata", {})
             document.processing_results = {
-                "analysis": result["analysis"],
-                "website": result["website"]["html"],
-                "interactive_elements": result["website"].get("interactive_elements", []),
-                "processing_info": result["processing_info"],
-                "concept_data": result["processing_info"].get("concept_data", {})
+                "analysis": result.get("analysis", {}),
+                "website": website_result.get("html", ""),
+                "interactive_elements": website_result.get("interactive_elements", []),
+                "processing_info": result.get("processing_info", {}),
+                "concept_data": result.get("processing_info", {}).get("concept_data", {}),
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model"),
+                "ai_provider": generation_metadata.get("provider"),
+                "html_quality_validation": _build_html_quality_payload(
+                    True,
+                    [],
+                    html_quality_attempts,
+                ),
+                "fallback_used": bool(fallback_reason),
+                "fallback_reason": fallback_reason,
             }
             logger.info(f"✅ Document {document_id} marked as ready")
 
@@ -349,12 +708,14 @@ async def upload_pdf(
                 user_prefs = {}
 
         # Add grade level from form if provided
-        if grade_level:
+        if grade_level is not None:
             user_prefs["grade_level"] = grade_level
 
         # Add description from form if provided
         if description:
             user_prefs["description"] = description
+
+        user_prefs = _apply_pdf_concept_preferences(user_prefs, subject, description)
 
         # Add AI model - prefer ai_model, fallback to zhipu_text_model for backward compatibility
         selected_model = ai_model or zhipu_text_model
@@ -451,6 +812,10 @@ async def get_documents(
                 current_doc = next((d for d in doc_group if d.root_document_id is None), doc_group[-1])
             
             version_count = len(doc_group)
+            generation_metadata = get_generation_metadata(
+                current_doc.processing_results,
+                current_doc.pdf_metadata
+            )
             
             result.append({
                 "id": current_doc.id,
@@ -466,7 +831,10 @@ async def get_documents(
                 "version_number": current_doc.version_number,
                 "is_current": current_doc.is_current,
                 "version_count": version_count,
-                "user_prompt": current_doc.user_prompt
+                "user_prompt": current_doc.user_prompt,
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model") if generation_metadata else None,
+                "ai_provider": generation_metadata.get("provider") if generation_metadata else None
             })
 
         # Sort by created_at descending
@@ -514,12 +882,16 @@ async def get_document(
 
         # Include processing results if available
         if document.processing_results:
+            generation_metadata = get_generation_metadata(document.processing_results, document.pdf_metadata)
             result["website"] = document.processing_results.get("website")
             result["analysis"] = document.processing_results.get("analysis")
             result["knowledge_cards"] = document.processing_results.get("knowledge_cards")
             result["interactive_elements"] = document.processing_results.get("interactive_elements")
             result["processing_info"] = document.processing_results.get("processing_info")
             result["generation_mode"] = document.processing_results.get("generation_mode")
+            result["generation_metadata"] = generation_metadata
+            result["ai_model"] = generation_metadata.get("model") if generation_metadata else None
+            result["ai_provider"] = generation_metadata.get("provider") if generation_metadata else None
 
             # Get concept_data from either processing_results or processing_info
             concept_data = document.processing_results.get("concept_data")
@@ -649,12 +1021,16 @@ async def get_public_document(
 
         # Include processing results if available
         if document.processing_results:
+            generation_metadata = get_generation_metadata(document.processing_results, document.pdf_metadata)
             result["website"] = document.processing_results.get("website")
             result["analysis"] = document.processing_results.get("analysis")
             result["knowledge_cards"] = document.processing_results.get("knowledge_cards")
             result["interactive_elements"] = document.processing_results.get("interactive_elements")
             result["processing_info"] = document.processing_results.get("processing_info")
             result["generation_mode"] = document.processing_results.get("generation_mode")
+            result["generation_metadata"] = generation_metadata
+            result["ai_model"] = generation_metadata.get("model") if generation_metadata else None
+            result["ai_provider"] = generation_metadata.get("provider") if generation_metadata else None
 
             # Get concept_data from either processing_results or processing_info
             concept_data = document.processing_results.get("concept_data")
@@ -1287,8 +1663,10 @@ async def process_concept_with_template_background(
             logger.error(f"❌ Document {document_id} not found")
             return
 
+        selected_model = user_prefs.get("ai_model") or user_prefs.get("zhipu_text_model")
+
         # Get AI processor instance
-        ai_processor = get_ai_processor()
+        ai_processor = get_ai_processor(ai_model=selected_model)
 
         # Build content info for template generation
         content_info = {
@@ -1304,35 +1682,81 @@ async def process_concept_with_template_background(
         logger.info(f"🔄 Generating website with template {template_id}...")
         generation_start = time.time()
 
-        result = await ai_processor.generate_with_selected_template(
-            template_id=template_id,
-            content_info=content_info,
-            user_preferences=user_prefs,
-            workflow_type="website_concept",
-            db_session_factory=db_session_factory,
-            customization_params=customization_params
+        async def generate_template_concept_once() -> Dict[str, Any]:
+            return await ai_processor.generate_with_selected_template(
+                template_id=template_id,
+                content_info=content_info,
+                user_preferences=user_prefs,
+                workflow_type="website_concept",
+                db_session_factory=db_session_factory,
+                customization_params=customization_params
+            )
+
+        result, html_quality_issues, html_quality_attempts = await _generate_with_html_quality_retry(
+            generate_template_concept_once,
+            workflow_label=f"Template concept document {document_id}",
+            max_retries=1,
         )
 
         generation_time = time.time() - generation_start
         logger.info(f"✅ Template generation completed in {generation_time:.2f}s")
 
-        if result["status"] == "error":
+        if result.get("status") == "error":
             logger.error(f"❌ Template generation failed: {result.get('error')}")
             document.status = "error"
             document.error_message = result.get('error')
+        elif html_quality_issues:
+            error_message = (
+                "Generated HTML failed quality validation after retry; "
+                f"issues: {'; '.join(html_quality_issues)}"
+            )
+            logger.error(f"Template concept processing failed HTML validation: {error_message}")
+            document.status = "error"
+            document.error_message = error_message
+            document.page_count = 1
+            document.pdf_metadata = {
+                "template_used": template_id,
+                "generation_method": "template_based",
+            }
+            document.processing_results = {
+                "failed_website": _extract_generated_html(result),
+                "template_used": template_id,
+                "generation_method": "template_based",
+                "metadata": result.get("metadata", {}),
+                "html_quality_validation": _build_html_quality_payload(
+                    False,
+                    html_quality_issues,
+                    html_quality_attempts,
+                ),
+            }
         else:
+            generation_metadata = build_generation_metadata(
+                ai_processor,
+                requested_model=selected_model,
+                workflow_type="concept",
+                generation_method="template_based"
+            )
             # Update document with results
             document.status = "ready"
             document.page_count = 1
             document.pdf_metadata = {
                 "template_used": template_id,
-                "generation_method": "template_based"
+                "generation_method": "template_based",
+                "generation_metadata": generation_metadata
             }
             document.processing_results = {
-                "website": result["html"],
+                "website": result.get("html", ""),
                 "template_used": template_id,
                 "generation_method": "template_based",
-                "metadata": result.get("metadata", {})
+                "metadata": result.get("metadata", {}),
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model"),
+                "ai_provider": generation_metadata.get("provider"),
+                "html_quality_validation": _build_html_quality_payload(
+                    True,
+                    [],
+                    html_quality_attempts,
+                ),
             }
             logger.info(f"✅ Document {document_id} marked as ready")
 
@@ -1498,8 +1922,18 @@ async def process_pdf_with_template_background(
             logger.error(f"❌ Document {document_id} not found")
             return
 
+        existing_generation_metadata = get_generation_metadata(document.processing_results, document.pdf_metadata)
+        selected_model = (
+            user_prefs.get("ai_model") or
+            user_prefs.get("zhipu_text_model") or
+            (existing_generation_metadata or {}).get("requested_model") or
+            (existing_generation_metadata or {}).get("model")
+        )
+        if selected_model == "default":
+            selected_model = None
+
         # Get AI processor instance
-        ai_processor = get_ai_processor()
+        ai_processor = get_ai_processor(ai_model=selected_model)
 
         # Build content info for template generation
         content_info = {
@@ -1512,7 +1946,10 @@ async def process_pdf_with_template_background(
         # For PDF workflow, we need to extract images first
         # Get processed images from PDF
         logger.info(f"🔄 Extracting images from PDF...")
-        processed_images = await ai_processor._convert_pdf_to_images(file_path)
+        processed_images = ai_processor.convert_pdf_to_images(
+            file_path,
+            max_pages=get_pdf_image_conversion_page_limit()
+        )
 
         # Add images to content_info
         content_info["images"] = processed_images
@@ -1522,36 +1959,83 @@ async def process_pdf_with_template_background(
         logger.info(f"🔄 Generating website with template {template_id}...")
         generation_start = time.time()
 
-        result = await ai_processor.generate_with_selected_template(
-            template_id=template_id,
-            content_info=content_info,
-            user_preferences=user_prefs,
-            workflow_type="website_pdf",
-            db_session_factory=db_session_factory,
-            customization_params=customization_params
+        async def generate_template_pdf_once() -> Dict[str, Any]:
+            return await ai_processor.generate_with_selected_template(
+                template_id=template_id,
+                content_info=content_info,
+                user_preferences=user_prefs,
+                workflow_type="website_pdf",
+                db_session_factory=db_session_factory,
+                customization_params=customization_params
+            )
+
+        result, html_quality_issues, html_quality_attempts = await _generate_with_html_quality_retry(
+            generate_template_pdf_once,
+            workflow_label=f"Template PDF document {document_id}",
+            max_retries=1,
         )
 
         generation_time = time.time() - generation_start
         logger.info(f"✅ Template generation completed in {generation_time:.2f}s")
 
-        if result["status"] == "error":
+        if result.get("status") == "error":
             logger.error(f"❌ Template generation failed: {result.get('error')}")
             document.status = "error"
             document.error_message = result.get('error')
+        elif html_quality_issues:
+            error_message = (
+                "Generated HTML failed quality validation after retry; "
+                f"issues: {'; '.join(html_quality_issues)}"
+            )
+            logger.error(f"Template PDF processing failed HTML validation: {error_message}")
+            document.status = "error"
+            document.error_message = error_message
+            document.page_count = len(processed_images)
+            document.pdf_metadata = {
+                "template_used": template_id,
+                "generation_method": "template_based",
+                "page_count": len(processed_images),
+            }
+            document.processing_results = {
+                "failed_website": _extract_generated_html(result),
+                "template_used": template_id,
+                "generation_method": "template_based",
+                "metadata": result.get("metadata", {}),
+                "html_quality_validation": _build_html_quality_payload(
+                    False,
+                    html_quality_issues,
+                    html_quality_attempts,
+                ),
+            }
         else:
+            generation_metadata = build_generation_metadata(
+                ai_processor,
+                requested_model=selected_model,
+                workflow_type="pdf",
+                generation_method="template_based"
+            )
             # Update document with results
             document.status = "ready"
             document.page_count = len(processed_images)
             document.pdf_metadata = {
                 "template_used": template_id,
                 "generation_method": "template_based",
-                "page_count": len(processed_images)
+                "page_count": len(processed_images),
+                "generation_metadata": generation_metadata
             }
             document.processing_results = {
-                "website": result["html"],
+                "website": result.get("html", ""),
                 "template_used": template_id,
                 "generation_method": "template_based",
-                "metadata": result.get("metadata", {})
+                "metadata": result.get("metadata", {}),
+                "generation_metadata": generation_metadata,
+                "ai_model": generation_metadata.get("model"),
+                "ai_provider": generation_metadata.get("provider"),
+                "html_quality_validation": _build_html_quality_payload(
+                    True,
+                    [],
+                    html_quality_attempts,
+                ),
             }
             logger.info(f"✅ Document {document_id} marked as ready")
 

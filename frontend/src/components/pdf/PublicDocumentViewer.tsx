@@ -49,6 +49,14 @@ interface InteractiveElement {
   title?: string
 }
 
+interface GenerationMetadata {
+  model?: string
+  provider?: string
+  generation_method?: string
+  generation_mode?: string
+  workflow_type?: string
+}
+
 interface DocumentData {
   id: number
   title: string
@@ -63,6 +71,10 @@ interface DocumentData {
   knowledge_cards?: KnowledgeCardsPayload
   interactive_elements?: InteractiveElement[]
   concept_data?: ConceptData
+  generation_metadata?: GenerationMetadata
+  ai_model?: string
+  ai_provider?: string
+  generation_mode?: string
   error_message?: string
   created_at: string
 }
@@ -330,6 +342,10 @@ export function PublicDocumentViewer({ documentId }: PublicDocumentViewerProps) 
     return (document?.knowledge_cards?.cards || []).map((card) => card.title).filter(Boolean) as string[]
   }, [document])
 
+  const generationModelLabel = useMemo(() => {
+    return document?.generation_metadata?.model || document?.ai_model || t('public_doc.legacy_model')
+  }, [document, t])
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -427,6 +443,7 @@ export function PublicDocumentViewer({ documentId }: PublicDocumentViewerProps) 
                   <p>{t('public_doc.grade')}: {document.grade_level ? `${document.grade_level}${t('public_doc.grade_suffix')}` : t('public_doc.not_specified')}</p>
                   <p>{t('public_doc.knowledge_point')}: {conceptName}</p>
                   <p>{t('public_doc.pages')}: {document.page_count}</p>
+                  <p>{t('public_doc.ai_model')}: {generationModelLabel}</p>
                 </div>
               </div>
 

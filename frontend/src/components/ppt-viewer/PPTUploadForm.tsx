@@ -1,11 +1,11 @@
 'use client'
 
 import React, { useCallback, useRef, useState } from 'react'
-import Cookies from 'js-cookie'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { useModelSettings } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage } from '@/components/providers/LanguageProvider'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -41,7 +41,7 @@ export default function PPTUploadForm({ onSuccess, embedded = false }: PPTUpload
   const [success, setSuccess] = useState<string | null>(null)
   const [dragActive, setDragActive] = useState(false)
 
-  const getAuthToken = () => Cookies.get('access_token')
+  const getAuthToken = () => getStoredAuthToken()
 
   const applySelectedFile = useCallback((selectedFile: File) => {
     const extension = selectedFile.name.split('.').pop()?.toLowerCase()

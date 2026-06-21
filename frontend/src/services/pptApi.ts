@@ -4,6 +4,8 @@
  * Handles all API calls for PPT presentation processing and viewing.
  */
 
+import { getStoredAuthToken } from '../lib/auth-token';
+
 // Prefer an explicit backend URL; otherwise use relative /api in production.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
@@ -77,10 +79,10 @@ export interface InteractiveView {
 }
 
 /**
- * Get auth token from localStorage (consistent with lib/api.ts)
+ * Get auth token from localStorage or cookie (consistent with lib/api.ts)
  */
 function getAuthHeader(): HeadersInit {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = getStoredAuthToken();
   const headers: HeadersInit = {};
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;

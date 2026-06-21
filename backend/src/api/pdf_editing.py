@@ -44,7 +44,7 @@ class WebEditRequest(BaseModel):
 	citations: List[CitationItem]
 	user_prompt: str
 	thinking_enabled: Optional[bool] = None
-	model: Optional[str] = None  # 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4', 'gpt-5.5', 'deepseek-v4-pro', 'gemini-3.1-pro', 'kimi-k2.6', 'qwen3.6-35b-a3b'
+	model: Optional[str] = None  # 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-5.4', 'gpt-5.5', 'deepseek-v4-pro', 'gemini-3.1-pro', 'kimi-k2.6', 'qwen3.6-27b', 'qwen3.6-35b-a3b'
 
 
 class WebEditResponse(BaseModel):
@@ -610,6 +610,11 @@ async def save_as_new_version(
 		'website': html_to_save,
 		'analysis': original_document.processing_results.get('analysis'),
 		'interactive_elements': original_document.processing_results.get('interactive_elements'),
+		'processing_info': original_document.processing_results.get('processing_info'),
+		'generation_mode': original_document.processing_results.get('generation_mode'),
+		'generation_metadata': original_document.processing_results.get('generation_metadata'),
+		'ai_model': original_document.processing_results.get('ai_model'),
+		'ai_provider': original_document.processing_results.get('ai_provider'),
 	}
 
 	new_document = Document(

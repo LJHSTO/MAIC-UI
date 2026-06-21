@@ -2,7 +2,7 @@
 
 import { useRouter, useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import Cookies from 'js-cookie';
+import { getStoredAuthToken } from '@/lib/auth-token';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:8000/api');
 
@@ -90,9 +90,7 @@ export default function PPTConfigPage() {
   const [selectAll, setSelectAll] = useState(false);
   const [useTemplates, setUseTemplates] = useState(false);
 
-  const getAuthToken = () => {
-    return Cookies.get('access_token');
-  };
+  const getAuthToken = () => getStoredAuthToken();
 
   useEffect(() => {
     fetchDocumentInfo();

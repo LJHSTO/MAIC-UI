@@ -1,12 +1,12 @@
 ﻿'use client'
 
 import React, { useCallback, useRef, useState } from 'react'
-import Cookies from 'js-cookie'
 import { Button } from '@/components/ui/Button'
 import { useModelSettings } from '@/components/providers/ModelSettingsProvider'
 import { useLanguage } from '@/components/providers/LanguageProvider'
 import { ConceptInputForm } from './ConceptInputForm'
 import PPTUploadForm from '@/components/ppt-viewer/PPTUploadForm'
+import { getStoredAuthToken } from '@/lib/auth-token'
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -21,6 +21,10 @@ interface UploadResponse {
 interface FormDataState {
   title: string
   subject: string
+  concept_name: string
+  concept_overview: string
+  mastery_points: string
+  design_idea: string
   grade_level: string
   description: string
   interests: string
@@ -46,6 +50,10 @@ export function PDFUploadForm({ hideTypeSelector = false, initialType = 'pdf' }:
   const [formData, setFormData] = useState<FormDataState>({
     title: '',
     subject: '',
+    concept_name: '',
+    concept_overview: '',
+    mastery_points: '',
+    design_idea: '',
     grade_level: '',
     description: '',
     interests: ''
@@ -57,7 +65,7 @@ export function PDFUploadForm({ hideTypeSelector = false, initialType = 'pdf' }:
   const [includePrerequisites, setIncludePrerequisites] = useState(false)
   const [generationMode, setGenerationMode] = useState<'fast' | 'heavy'>('heavy')
 
-  const getAuthToken = () => Cookies.get('access_token')
+  const getAuthToken = () => getStoredAuthToken()
 
   const applySelectedFile = useCallback(
     (selectedFile: File) => {
@@ -115,6 +123,10 @@ export function PDFUploadForm({ hideTypeSelector = false, initialType = 'pdf' }:
     setFormData({
       title: '',
       subject: '',
+      concept_name: '',
+      concept_overview: '',
+      mastery_points: '',
+      design_idea: '',
       grade_level: '',
       description: '',
       interests: ''
@@ -150,6 +162,20 @@ payload.append('description', formData.description.trim())
       payload.append('generation_mode', generationMode)
       payload.append('ai_model', selectedModel)
 
+      const conceptData = {
+        subject: formData.subject.trim(),
+        concept_name: formData.concept_name.trim(),
+        concept_overview: formData.concept_overview.trim(),
+        mastery_points: formData.mastery_points.trim(),
+        design_idea: formData.design_idea.trim()
+      }
+      const hasConceptFocus = [
+        conceptData.concept_name,
+        conceptData.concept_overview,
+        conceptData.mastery_points,
+        conceptData.design_idea
+      ].some(Boolean)
+
       // Send user preferences as JSON
       const userPreferences = {
         grade_level: formData.grade_level ? parseInt(formData.grade_level, 10) : undefined,
@@ -158,6 +184,8 @@ payload.append('description', formData.description.trim())
           : [],
         include_exercises: includeExercises,
         include_prerequisites: includePrerequisites,
+        concept_data: hasConceptFocus ? conceptData : undefined,
+        pdf_generation_mode: hasConceptFocus ? 'pdf_with_concept_focus' : 'pdf_only',
         language: language  // Pass the current language preference
       }
       payload.append('user_preferences', JSON.stringify(userPreferences))
@@ -404,6 +432,84 @@ payload.append('description', formData.description.trim())
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#7C4DFF] focus:ring-2 focus:ring-[#7C4DFF]/20"
                   placeholder={t('upload.subject_placeholder')}
                 />
+              </div>
+
+              <div className="md:col-span-3 rounded-2xl border border-violet-100 bg-violet-50/60 p-4">
+                <div className="mb-3">
+                  <p className="text-[15px] font-semibold text-slate-900">
+                    {language === 'zh' ? '知识点聚焦设置（可选）' : 'Concept Focus Settings (Optional)'}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    {language === 'zh'
+                      ? '上传 PDF 的同时指定核心知识点、掌握要点和设计思路，生成时会以 PDF 内容为依据，并围绕这些目标定制互动课程。'
+                      : 'Upload a PDF while specifying the target concept, mastery goals, and design approach. Generation will use the PDF as source material and focus the course around these goals.'}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="concept_name" className="mb-1 block text-[13px] font-medium text-slate-700">
+                      {language === 'zh' ? '知识点名称（可选）' : 'Concept name (optional)'}
+                    </label>
+                    <input
+                      id="concept_name"
+                      name="concept_name"
+                      value={formData.concept_name}
+                      onChange={handleInputChange}
+                      disabled={uploading}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#7C4DFF] focus:ring-2 focus:ring-[#7C4DFF]/20"
+                      placeholder={t('concept.name_placeholder')}
+                    />
+                  </div>
+
+                  <div className="md:row-span-2">
+                    <label htmlFor="design_idea" className="mb-1 block text-[13px] font-medium text-slate-700">
+                      {language === 'zh' ? '设计思路（可选）' : 'Design idea (optional)'}
+                    </label>
+                    <textarea
+                      id="design_idea"
+                      name="design_idea"
+                      value={formData.design_idea}
+                      onChange={handleInputChange}
+                      disabled={uploading}
+                      rows={5}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#7C4DFF] focus:ring-2 focus:ring-[#7C4DFF]/20"
+                      placeholder={t('concept.design_idea_placeholder')}
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="concept_overview" className="mb-1 block text-[13px] font-medium text-slate-700">
+                      {language === 'zh' ? '知识点概述（可选）' : 'Concept overview (optional)'}
+                    </label>
+                    <textarea
+                      id="concept_overview"
+                      name="concept_overview"
+                      value={formData.concept_overview}
+                      onChange={handleInputChange}
+                      disabled={uploading}
+                      rows={3}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#7C4DFF] focus:ring-2 focus:ring-[#7C4DFF]/20"
+                      placeholder={t('concept.overview_placeholder')}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label htmlFor="mastery_points" className="mb-1 block text-[13px] font-medium text-slate-700">
+                      {language === 'zh' ? '学生掌握要点（可选）' : 'Mastery points (optional)'}
+                    </label>
+                    <textarea
+                      id="mastery_points"
+                      name="mastery_points"
+                      value={formData.mastery_points}
+                      onChange={handleInputChange}
+                      disabled={uploading}
+                      rows={3}
+                      className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-[#7C4DFF] focus:ring-2 focus:ring-[#7C4DFF]/20"
+                      placeholder={t('concept.mastery_points_placeholder')}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
