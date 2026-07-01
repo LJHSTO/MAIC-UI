@@ -242,6 +242,13 @@ def anthropic_scientific_prompt(concept_data: Dict) -> str:
 
 def anthropic_concept_html_prompt(concept_data: Dict, constraints_summary: str) -> str:
     return f"""
+Hard requirements for generated HTML:
+- Return one complete self-contained HTML document only, no Markdown fences.
+- Include at least one <canvas> element and draw the main visualization with native JavaScript.
+- Implement function trackEvent(eventType, payload) that appends events to localStorage key maic_learning_events.
+- Call trackEvent for diagnostic choices, core interactions, formative checks, confidence ratings, and final independent task/reflection.
+- Include at least three learner controls such as button, input, select, textarea, or role="button" elements.
+
 创建一个简洁的交互式学习网站，重点突出可视化交互。
 
 【核心知识点】
@@ -366,6 +373,13 @@ def anthropic_procedural_metadata_prompt(
 
 def visual_engine_prompt(concept_data: Dict, constraints_summary: str, grade_level: str) -> str:
     return f"""
+Hard requirements for generated HTML:
+- Return one complete self-contained HTML document only, no Markdown fences.
+- Include at least one <canvas> element and draw the main visualization with native JavaScript.
+- Implement function trackEvent(eventType, payload) that appends events to localStorage key maic_learning_events.
+- Call trackEvent for diagnostic choices, core interactions, formative checks, confidence ratings, and final independent task/reflection.
+- Include at least three learner controls such as button, input, select, textarea, or role="button" elements.
+
 创建一个简洁的交互式学习网站，重点突出可视化交互。
 
 【核心知识点】

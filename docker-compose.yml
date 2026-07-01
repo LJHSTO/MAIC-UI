@@ -40,6 +40,7 @@ services:
         http_proxy: ${http_proxy}
         https_proxy: ${https_proxy}
         NEXT_PUBLIC_API_URL: http://localhost:8927/api
+    environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8927/api
     container_name: maic_ui_frontend
     depends_on:

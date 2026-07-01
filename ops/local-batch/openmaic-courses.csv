@@ -1,0 +1,2 @@
+﻿"file","page_range","title","requirement","pdf_provider_id","enable_web_search","enable_image_generation","enable_video_generation","enable_tts","agent_mode"
+"pdfs\your-lesson.pdf","1-3","Your OpenMAIC lesson","请生成一节多场景互动课堂，围绕本节 PDF 内容组织诊断、探究、讲解、练习和总结。","unpdf","false","false","false","false","default"

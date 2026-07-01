@@ -185,6 +185,8 @@ class FastGenerator(BaseGenerator):
         6. 适合{grade_level}年级学生理解和使用
         7. **所有用户可见内容必须使用简体中文**
         8. **禁止使用Markdown代码块，不要输出```html或```**
+        9. **必须包含一个 <canvas> 元素**，并用原生 JavaScript 绘制可视化内容
+        10. **必须实现 function trackEvent(eventType, payload)**，在诊断选择、互动操作、形成性检查、信心评分时调用，写入 localStorage 的 maic_learning_events
 
         请只返回纯净的HTML代码，不要包含其他解释。"""
 

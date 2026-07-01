@@ -276,6 +276,33 @@ model-dropdown.png
 # Generated batch outputs
 maic_outputs/
 maic_batch_outputs/
+ops/**/outputs/
+ops/**/logs/
+ops/**/backups/
+ops/**/__pycache__/
+ops/**/local-service-pids.json
+ops/**/pdf-page-slices*/
+ops/**/*.bak
+ops/**/*.backup
+ops/**/*.pdf
+ops/batch-client/courses-full-*.csv
+ops/batch-client/maicui-*.md
+ops/local-batch/*report*.csv
+ops/local-batch/*report*.json
+ops/local-batch/*prompts*.md
+ops/local-batch/maicui-courses-demo.csv
+ops/local-batch/maicui-courses - *.csv
+ops/local-batch/demo-*.csv
+ops/local-batch/demo-active-learning/
+ops/local-hosting/
+ops/local-batch/build-local-maic-openmaic-prompts.py
+ops/local-batch/build-qwen-rerun-courses.py
+ops/local-batch/expand-maicui-courses-3models.py
+ops/local-batch/extract-maicui-advanced-content.py
+ops/local-batch/extract-maicui-questions.py
+ops/local-batch/normalize-maicui-visible-titles.py
+ops/local-batch/sync_maicui_full_prompts_to_desktop.py
+ops/local-batch/run-extract-maicui-advanced-content.cmd
 
 # Duplicate lockfile (use npm)
 pnpm-lock.yaml

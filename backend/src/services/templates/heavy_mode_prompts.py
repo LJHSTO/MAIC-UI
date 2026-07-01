@@ -213,6 +213,8 @@ STAGE1_ALIGNED_SIMULATION_PROMPT = """
 - 中文界面，中文注释
 - 包含至少2个可调参数的滑块控件
 - 包含开始/暂停/重置三个基本按钮
+- **必须包含一个 <canvas> 元素**，并用原生 JavaScript 绘制可视化内容
+- **必须实现 function trackEvent(eventType, payload)**，在诊断选择、互动操作、形成性检查、信心评分时调用，写入 localStorage 的 maic_learning_events
 - 左右面板内容高度对齐，步骤清晰对应
 
 {language_requirements}

@@ -1,101 +1,155 @@
-﻿# MAIC-UI Batch Course Generation
+# MAIC-UI Batch Course Generation
+
+This guide explains how to generate interactive courseware locally from your own MAIC-UI backend and your own model API credentials.
+
+## What Uses Your API Key?
+
+The batch scripts do **not** call model providers directly. They call the MAIC-UI FastAPI backend.
+
+Configure model credentials in `.env`:
+
+```env
+TRANSFER_API_KEY=sk-your-key
+TRANSFER_BASE_URL=https://api.siliconflow.cn/v1
+TRANSFER_MODEL=glm-4.7
+```
+
+Then the backend uses that key when it generates PDF, PPT, or concept courseware. The script-side `.env.batch` only stores the backend URL and MAIC-UI login account.
 
 ## Quick Start (Windows)
 
 ```cmd
-:: 1. One-time setup
-copy .env.batch.example .env.batch
-notepad .env.batch            :: set MAIC_API_BASE to host LAN IP
-maic-gen setup                :: register account & test connectivity
+:: 1. Configure your model API key
+copy .env.example .env
+notepad .env
 
-:: 2. Single course
+:: 2. Start MAIC-UI locally
+npm run install:all
+npm run dev
+
+:: 3. Configure the batch client
+copy .env.batch.example .env.batch
+notepad .env.batch
+
+:: 4. Register/login and verify backend connectivity
+maic-gen setup
+
+:: 5. Generate one course
 maic-gen concept examples\concept_derivative.json
 maic-gen pdf .\lesson.pdf "Quadratic Functions"
 maic-gen ppt .\slides.pptx "Probability Introduction"
 
-:: 3. Batch generation
+:: 6. Generate many courses from a TSV manifest
 maic-batch examples\batch_courses.tsv
 ```
+
+For Docker users:
+
+```cmd
+copy .env.example .env
+notepad .env
+docker compose build
+docker compose up -d
+```
+
+Use `MAIC_API_BASE=http://127.0.0.1:8927/api` in `.env.batch` when calling through nginx, or `http://127.0.0.1:8000/api` when calling the backend directly.
 
 ## Quick Start (Linux / macOS / Git Bash)
 
 ```bash
-# 1. Prepare config
+cp .env.example .env
+# Edit .env and set TRANSFER_API_KEY / TRANSFER_BASE_URL / TRANSFER_MODEL
+npm run install:all
+npm run dev
+
 cp .env.batch.example .env.batch
 # Edit MAIC_API_BASE, MAIC_EMAIL, MAIC_PASSWORD
 
-# 2. One-time setup (register if needed)
-MAIC_API_BASE=http://HOST_IP:8000/api \
+MAIC_API_BASE=http://127.0.0.1:8000/api \
   MAIC_EMAIL=test@example.com \
   MAIC_PASSWORD='Test123456' \
-  ./scripts/maic_generate_course.sh help
+  ./scripts/maic_generate_course.sh concept ./examples/concept_derivative.json
 
-# 3. Single course
-./scripts/maic_generate_course.sh concept ./examples/concept_derivative.json
-./scripts/maic_generate_course.sh pdf ./lesson.pdf "Quadratic Functions"
-./scripts/maic_generate_course.sh ppt ./slides.pptx "Probability Introduction"
-
-# 4. Batch generation
 ./scripts/maic_batch_generate.sh examples/batch_courses.tsv
 ```
 
 ## Architecture
 
-```
+```text
 TSV manifest / concept JSON / PDF / PPTX
-  ┃
-  ┣━━ maic-gen.cmd / maic_batch.ps1     (Windows)
-  ┣━━ maic_generate_course.sh / maic_batch_generate.sh  (bash)
-  ┃
-  ▼
-MAIC-UI FastAPI backend  (run by host on 0.0.0.0:8000)
-  ┃
-  ▼
-AI generation → download HTML + JSON metadata + logs
+  |
+  |-- maic-gen.cmd / scripts\maic_generate.ps1          (Windows single task)
+  |-- maic-batch.cmd / scripts\maic_batch.ps1           (Windows batch)
+  |-- scripts/maic_generate_course.sh                   (bash single task)
+  |-- scripts/maic_batch_generate.sh                    (bash batch)
+  |
+  v
+MAIC-UI FastAPI backend (uses your .env model API key)
+  |
+  v
+AI generation -> HTML + JSON metadata + logs
 ```
 
-The scripts call existing backend APIs without reimplementing anything:
+The scripts call existing backend APIs:
 
+- `POST /api/auth/register`
 - `POST /api/auth/login`
 - `POST /api/pdf/upload`
 - `POST /api/pdf/concept/upload`
 - `POST /api/ppt/upload`
 - `POST /api/ppt/documents/{id}/configure`
-- Status polling & result download endpoints
+- status polling and result download endpoints
 
-## Host Machine Setup
+## .env Configuration
 
-The person with MAIC-UI configured runs the backend:
+`.env` is read by the backend and contains model-provider credentials.
 
-```cmd
-cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
+| Variable | Description |
+|---|---|
+| `TRANSFER_API_KEY` | Your OpenAI-compatible transfer endpoint API key |
+| `TRANSFER_BASE_URL` | Endpoint base URL, for example `https://api.siliconflow.cn/v1` |
+| `TRANSFER_MODEL` | Default model used when no task override is supplied |
+| `ZHIPU_API_KEY`, `OPENAI_API_KEY`, etc. | Optional provider-specific credentials |
 
-Other machines on the same LAN use `http://YOUR_LAN_IP:8000/api` as the API base.
+## .env.batch Configuration
 
-For remote collaborators, expose via Cloudflare Tunnel or ngrok and use `https://YOUR_TUNNEL_URL/api`.
+`.env.batch` is read by the CLI scripts and contains backend/login settings.
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAIC_API_BASE` | `http://127.0.0.1:8000/api` | Backend API URL |
+| `MAIC_EMAIL` | required | MAIC-UI account email |
+| `MAIC_PASSWORD` | required | MAIC-UI account password |
+| `MAIC_MODEL` | `glm-4.7` | Default AI model override sent to backend |
+| `MAIC_LANGUAGE` | `zh` | Output language (`zh`/`en`) |
+| `MAIC_GENERATION_MODE` | `heavy` | PDF mode: `fast` or `heavy` |
+| `MAIC_PUBLIC` | `false` | Publish generated document publicly |
+| `MAIC_OUT_DIR` | `maic_outputs` | Single-course output directory |
+| `MAIC_BATCH_OUT_DIR` | `maic_batch_outputs` | Batch output directory |
+| `MAIC_CONTINUE_ON_ERROR` | `true` | Keep processing after one task fails |
+| `MAIC_TIMEOUT_SECONDS` | `1800` | Max wait per task |
+| `MAIC_PPT_BATCH_SIZE` | `5` | Slides per PPT batch |
 
 ## Manifest Format (TSV)
 
-Tab-separated with these columns:
+Use tab-separated values with this header:
 
-```
+```text
 id    type    input    title    subject    grade    model    public    mode    language
 ```
 
 | Column | Description |
-|--------|-------------|
-| id | Stable task id for output folders and logs |
-| type | `pdf`, `ppt`, or `concept` |
-| input | File path (relative to manifest, or absolute) |
-| title | Course title (ignored for concept) |
-| subject | Optional, e.g. `math` |
-| grade | Optional grade level, e.g. `10` |
-| model | Optional model override, e.g. `glm-4.7` |
-| public | `true` or `false` |
-| mode | PDF generation mode: `fast` or `heavy` |
-| language | `zh` or `en` |
+|---|---|
+| `id` | Stable task id for output folders and logs |
+| `type` | `pdf`, `ppt`, or `concept` |
+| `input` | File path relative to the manifest, or absolute path |
+| `title` | Course title; ignored for concept JSON |
+| `subject` | Optional subject, e.g. `math` |
+| `grade` | Optional grade level, e.g. `10` |
+| `model` | Optional model override, e.g. `glm-4.7` |
+| `public` | `true` or `false` |
+| `mode` | PDF generation mode: `fast` or `heavy` |
+| `language` | `zh` or `en` |
 
 Blank lines and lines starting with `#` are ignored.
 
@@ -118,7 +172,7 @@ Blank lines and lines starting with `#` are ignored.
 
 ## Output Structure
 
-```
+```text
 maic_batch_outputs/
 ├── concept_derivative/
 │   └── pdf_123/
@@ -130,36 +184,26 @@ maic_batch_outputs/
 └── summary.txt
 ```
 
-## .env.batch Configuration
+## Local Batch Helpers
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| MAIC_API_BASE | (required) | Backend API URL |
-| MAIC_EMAIL | (required) | Account email |
-| MAIC_PASSWORD | (required) | Account password |
-| MAIC_MODEL | glm-4.7 | Default AI model |
-| MAIC_LANGUAGE | zh | Output language (zh/en) |
-| MAIC_GENERATION_MODE | heavy | PDF generation mode |
-| MAIC_PUBLIC | false | Publish publicly |
-| MAIC_OUT_DIR | maic_outputs | Single-course output dir |
-| MAIC_BATCH_OUT_DIR | maic_batch_outputs | Batch output dir |
-| MAIC_CONTINUE_ON_ERROR | true | Keep going on failure |
-| MAIC_TIMEOUT_SECONDS | 1800 | Max wait per task |
-| MAIC_PPT_BATCH_SIZE | 5 | Slides per PPT batch |
+`ops/local-batch` contains Windows helpers for local experiments with MAIC-UI and OpenMAIC:
 
-## Recommended Workflow
+- start/stop local services and write logs/PIDs
+- run MAIC-UI batch generation against `http://127.0.0.1:8000/api`
+- run OpenMAIC batch generation against `http://localhost:3001`
+- slice source PDFs by `page_range` before upload
+- save generated HTML/JSON/results under ignored `outputs/`
 
-1. Start with one concept task to verify the pipeline works end-to-end
-2. Add one task per row in the TSV manifest with stable ids
-3. Run one model at a time first to avoid API throttling and SQLite contention
-4. Keep document.json, website.json, and logs as benchmark artifacts
-5. Use MAIC-UI WebEditor or human raters to review generated courses
-6. Store published versions separately from raw outputs
+See `ops/local-batch/README-local-batch.md` for details.
+
+## Quality Notes
+
+Generated HTML is validated for a minimum size, learner controls, a canvas visualization, and a `trackEvent(eventType, payload)` logger that writes to `localStorage.maic_learning_events`. If validation fails, the backend records the issue in document metadata and may retry once. Prefer fixing prompt requirements first; blind retries can be expensive on slow models.
 
 ## Safety Notes
 
-- Use a dedicated low-privilege test account for collaborators
-- Tunnel URLs are temporary access tokens — treat them as secrets
-- Batch generation consumes the API key on the host MAIC-UI backend
-- For large studies, migrate from SQLite to PostgreSQL and add rate limits
-- Do not expose the backend publicly without authentication
+- Use your own model API key in `.env`; never commit it.
+- Use a dedicated low-privilege test account for collaborators.
+- Batch generation consumes the host backend's model API quota.
+- For large batches, run sequentially first and prefer PostgreSQL over SQLite.
+- Do not expose the backend publicly without authentication and rate limits.

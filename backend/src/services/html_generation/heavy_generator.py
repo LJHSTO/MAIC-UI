@@ -761,6 +761,7 @@ body { font-family: 'Source Han Sans CN', 'Microsoft YaHei', sans-serif; line-he
             }};
         }}
         draw();
+        function trackEvent(eventType, payload) {{ try {{ const key = ''maic_learning_events''; let arr = JSON.parse(localStorage.getItem(key) || ''[]''); arr.push(Object.assign({{timestamp: Date.now()}}, {{eventType: eventType}}, payload || {{}})); localStorage.setItem(key, JSON.stringify(arr)); }} catch(e) {{}} }}
     </script>
 </body>
 </html>"""
